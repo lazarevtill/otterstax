@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+`connections.snowflake` parses `SnowflakeConnectionDesc` entries with a driver,
+account host, account, username, database, schema, warehouse, role and `token_env`.
+Credentials stay as environment references. Only PAT and OAuth authentication
+names are accepted; inline credentials and arbitrary connection strings are
+refused. Timeouts and row/cell/result byte limits must be positive. This is
+configuration support only; datasource execution is not registered yet. See
+[Snowflake status](../docs/snowflake.md).
+
 `service.security.files` contains absolute `read_roots` / `write_roots` sequences
 and a positive `max_file_bytes` (default 64 MiB). Keycloak mode defaults to denying
 SQL file access. Startup opens and validates roots against protected server paths;

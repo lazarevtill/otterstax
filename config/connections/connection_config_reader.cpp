@@ -5,16 +5,20 @@
 
 #include "utility/parse_port.hpp"
 #include "utility/s3_transport.hpp"
+#include "utility/tracy_profiler.hpp"
 #include "yaml_scalar.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 #include <cctype>
+#include <charconv>
+#include <limits>
 #include <map>
 #include <memory_resource>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace config {
@@ -181,12 +185,14 @@ namespace config {
             if (auto err = check(config.postgresql, "postgresql"); err.contains_error()) {
                 return err;
             }
-            return check(config.clickhouse, "clickhouse");
+            if (auto err = check(config.clickhouse, "clickhouse"); err.contains_error()) return err;
+            return check(config.snowflake, "snowflake");
         }
     } // namespace
 
     core::result_wrapper_t<ConnectionsConfig> parse_connections(const YAML::Node& connections_node,
                                                                 std::pmr::memory_resource* resource) {
+        OTX_ZONE_N("config::parse_connections");
         ConnectionsConfig result;
 
         if (!connections_node || !connections_node.IsMap()) {
@@ -254,6 +260,47 @@ namespace config {
             }
         }
 
+        if (connections_node["snowflake"]) {
+            if (!connections_node["snowflake"].IsSequence())
+                return invalid_connection("snowflake", "section", "must be a sequence", resource);
+            std::size_t index = 0;
+            for (const auto& node : connections_node["snowflake"]) {
+                if (!node.IsMap()) return invalid_connection("snowflake", "entry", "must be a mapping", resource);
+                if (node["token"] || node["password"] || node["connection_string"])
+                    return invalid_connection("snowflake", "entry", "use token_env; inline credentials and connection strings are not accepted", resource);
+                entry_reader_t entry{node, "snowflake", index++, resource};
+                SnowflakeConnectionDesc desc;
+                desc.alias = entry.str("alias");
+                desc.driver = entry.str("driver", desc.driver);
+                desc.host = entry.str("host");
+                desc.account = entry.str("account");
+                desc.username = entry.str("username");
+                desc.database = entry.str("database");
+                desc.schema = entry.str("schema", desc.schema);
+                desc.warehouse = entry.str("warehouse");
+                desc.role = entry.str("role");
+                desc.table = entry.str("table");
+                desc.authenticator = entry.str("authenticator", desc.authenticator);
+                desc.token_env = entry.str("token_env");
+                auto number = [&](const char* key, auto& target) -> bool {
+                    const auto text = entry.str(key, std::to_string(target));
+                    uint64_t parsed{};
+                    const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
+                    if (result.ec != std::errc{} || result.ptr != text.data() + text.size() || parsed == 0 ||
+                        parsed > std::numeric_limits<std::decay_t<decltype(target)>>::max()) return false;
+                    target = static_cast<std::decay_t<decltype(target)>>(parsed);
+                    return true;
+                };
+                if (!number("connect_timeout_seconds", desc.connect_timeout_seconds) ||
+                    !number("query_timeout_seconds", desc.query_timeout_seconds) ||
+                    !number("max_rows", desc.max_rows) || !number("max_result_bytes", desc.max_result_bytes) ||
+                    !number("max_cell_bytes", desc.max_cell_bytes))
+                    return invalid_connection("snowflake", desc.alias, "limits must be positive integers within their field range", resource);
+                if (auto err = entry.take_error(); err.contains_error()) return err;
+                result.snowflake.push_back(std::move(desc));
+            }
+        }
+
         if (connections_node["s3"] && connections_node["s3"].IsSequence()) {
             std::size_t index = 0;
             for (const auto& node : connections_node["s3"]) {
@@ -287,6 +334,7 @@ namespace config {
         if (auto err = validate_all(result.clickhouse, "clickhouse", resource); err.contains_error()) {
             return err;
         }
+        if (auto err = validate_all(result.snowflake, "snowflake", resource); err.contains_error()) return err;
         if (auto err = validate_all(result.s3, "s3", resource); err.contains_error()) {
             return err;
         }
@@ -316,6 +364,27 @@ namespace config {
         return backend_validation_error(
             {{"alias", &c.alias}, {"host", &c.host}, {"username", &c.username}, {"database", &c.database}},
             c.port);
+    }
+
+    std::optional<std::string> validation_error(const SnowflakeConnectionDesc& c) {
+        OTX_ZONE_N("config::validation_error_snowflake");
+        if (auto missing = first_missing({{"alias", &c.alias}, {"driver", &c.driver}, {"host", &c.host},
+            {"account", &c.account}, {"username", &c.username}, {"database", &c.database}, {"schema", &c.schema},
+            {"warehouse", &c.warehouse}, {"role", &c.role}, {"token_env", &c.token_env}})) return missing;
+        if (c.authenticator != "oauth" && c.authenticator != "programmatic_access_token")
+            return "authenticator must be oauth or programmatic_access_token";
+        if (!(std::isalpha(static_cast<unsigned char>(c.token_env[0])) || c.token_env[0] == '_') ||
+            !std::all_of(c.token_env.begin(), c.token_env.end(), [](unsigned char ch) { return std::isalnum(ch) || ch == '_'; }))
+            return "token_env must name an environment variable";
+        if (!std::all_of(c.host.begin(), c.host.end(), [](unsigned char ch) { return std::isalnum(ch) || ch == '.' || ch == '-'; }))
+            return "host must be a DNS hostname without a scheme, port or path";
+        for (const auto* value : {&c.driver, &c.account, &c.username, &c.database, &c.schema, &c.warehouse, &c.role, &c.table})
+            if (std::any_of(value->begin(), value->end(), [](unsigned char ch) { return ch < 32 || ch == 127; }))
+                return "connection fields must not contain control characters";
+        if (c.connect_timeout_seconds == 0 || c.query_timeout_seconds == 0 || c.max_rows == 0 ||
+            c.max_result_bytes == 0 || c.max_cell_bytes == 0 || c.max_cell_bytes > c.max_result_bytes)
+            return "limits must be positive and max_cell_bytes must not exceed max_result_bytes";
+        return std::nullopt;
     }
 
     std::optional<std::string> validation_error(const S3CredentialDesc& c) {

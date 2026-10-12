@@ -4,6 +4,7 @@
 #pragma once
 
 #include <string>
+#include <cstdint>
 #include <vector>
 
 namespace config {
@@ -44,6 +45,26 @@ struct ChConnectionDesc {
     std::string table;
 };
 
+struct SnowflakeConnectionDesc {
+    std::string alias;
+    std::string driver{"libsfodbc.so"};
+    std::string host;
+    std::string account;
+    std::string username;
+    std::string database;
+    std::string schema{"PUBLIC"};
+    std::string warehouse;
+    std::string role;
+    std::string table;
+    std::string authenticator{"programmatic_access_token"};
+    std::string token_env;
+    uint32_t connect_timeout_seconds{10};
+    uint32_t query_timeout_seconds{30};
+    uint64_t max_rows{1000000};
+    uint64_t max_result_bytes{64 * 1024 * 1024};
+    uint64_t max_cell_bytes{16 * 1024 * 1024};
+};
+
 struct S3CredentialDesc {
     std::string alias;
     std::string access_key;
@@ -61,6 +82,7 @@ struct ConnectionsConfig {
     std::vector<MysqlConnectionDesc> mysql;
     std::vector<PgConnectionDesc> postgresql;
     std::vector<ChConnectionDesc> clickhouse;
+    std::vector<SnowflakeConnectionDesc> snowflake;
     std::vector<S3CredentialDesc> s3;
 };
 

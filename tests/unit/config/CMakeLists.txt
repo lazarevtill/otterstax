@@ -7,6 +7,7 @@ set(${PROJECT_NAME}_SOURCES
     test_security_config.cpp
     test_file_access.cpp
     test_s3_security_config.cpp
+    test_snowflake_config.cpp
 )
 
 add_executable(${PROJECT_NAME} ${${PROJECT_NAME}_SOURCES})

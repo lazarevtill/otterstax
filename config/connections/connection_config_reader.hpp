@@ -41,6 +41,7 @@ core::result_wrapper_t<ConnectionsConfig> parse_connections(const YAML::Node& co
 std::optional<std::string> validation_error(const MysqlConnectionDesc& c);
 std::optional<std::string> validation_error(const PgConnectionDesc& c);
 std::optional<std::string> validation_error(const ChConnectionDesc& c);
+std::optional<std::string> validation_error(const SnowflakeConnectionDesc& c);
 std::optional<std::string> validation_error(const S3CredentialDesc& c);
 
 }  // namespace config
