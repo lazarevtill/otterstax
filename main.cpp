@@ -2,6 +2,7 @@
 // Copyright 2025-2026  OtterStax
 
 #include <memory>
+#include "security/file_access.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <memory_resource>
@@ -91,8 +92,15 @@ int main(int argc, char* argv[]) {
     }
     config::ServiceConfig server_config = std::move(loaded.value());
     std::shared_ptr<const otterstax::security::server_access> access;
+    std::shared_ptr<const otterstax::security::file_access> files;
     try {
         access = otterstax::security::make_server_access(server_config.security);
+        std::vector<std::filesystem::path> protected_paths{data_dir, config_path, server_config.security.private_key_file,
+                                                          server_config.security.certificate_file, server_config.security.keycloak.ca_file};
+        files = std::make_shared<otterstax::security::file_access>(
+            server_config.security.files,
+            server_config.security.mode == otterstax::security::access_mode::trusted_private,
+            protected_paths);
     } catch (const std::exception& error) {
         log->error("Cannot initialize client security: {}", error.what());
         return 1;
@@ -106,7 +114,7 @@ int main(int argc, char* argv[]) {
 
     // Create component manager
     OTX_MESSAGE_L("startup: creating component manager");
-    ComponentManager cmanager(make_create_config(data_dir), server_config.connections);
+    ComponentManager cmanager(make_create_config(data_dir), server_config.connections, files);
 
     if (auto recovered = cmanager.recover(); recovered.contains_error()) {
         log->error("Cannot recover persisted Kafka objects: {}", recovered.what.c_str());

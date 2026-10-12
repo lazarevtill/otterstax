@@ -32,3 +32,8 @@ Arrow stream over an exclusively created private file. Only `commit()` publishes
 it; destruction discards incomplete output. Keep configured directories under
 the deployment account's control. The descriptor boundary does not defend against
 an OS user who can rename entries in those directories.
+
+The executable constructs the SQL policy before the engine. ComponentManager
+gives S3 a separate file actor restricted to private tenant staging. Do not pass
+the S3 actor's file permissions to SQL or add a client-controlled bypass flag.
+File limits bound encoded file bytes, not total query or decompression memory.

@@ -2,6 +2,7 @@
 // Copyright 2025-2026  OtterStax
 
 #include "component_manager.hpp"
+#include "security/file_access.hpp"
 #include "connection_retry.hpp"
 #include "utility/logger.hpp"
 #include "utility/tracy_profiler.hpp"
@@ -35,7 +36,8 @@ namespace {
     }
 } // namespace
 
-ComponentManager::ComponentManager(const configuration::config& config, const config::ConnectionsConfig& connections)
+ComponentManager::ComponentManager(const configuration::config& config, const config::ConnectionsConfig& connections,
+                                   std::shared_ptr<const otterstax::security::file_access> files)
     : engine_(new db::otterbrix_engine_t(config))
     , resource_(engine_->dispatcher()->resource())
     , aliases_(make_alias_registry(connections)) {
@@ -97,16 +99,26 @@ ComponentManager::ComponentManager(const configuration::config& config, const co
 
     {
         OTX_ZONE_N("ComponentManager::spawn_s3");
-        s3_manager_ = actor_zeta::spawn<conn::s3::ConnectorManager>(resource_);
+        const auto staging = std::filesystem::path(config.disk.path) / "s3-staging";
+        std::filesystem::create_directories(staging);
+        if (std::filesystem::is_symlink(staging)) throw std::runtime_error("S3 staging directory must not be a symbolic link");
+        std::filesystem::permissions(staging, std::filesystem::perms::owner_all);
+        otterstax::security::file_access_config staging_config;
+        if (files) staging_config.max_file_bytes = files->max_file_bytes();
+        staging_config.read_roots = {std::filesystem::absolute(staging).string()};
+        staging_config.write_roots = staging_config.read_roots;
+        auto staging_files = std::make_shared<otterstax::security::file_access>(staging_config);
+        s3_manager_ = actor_zeta::spawn<conn::s3::ConnectorManager>(resource_, staging_config.read_roots.front(), staging_files);
         assert(s3_manager_ != nullptr && "s3 manager must not be null");
 
-        file_manager_ = actor_zeta::spawn<conn::file::FileManager>(resource_, otterbrix_manager_->address());
+        file_manager_ = actor_zeta::spawn<conn::file::FileManager>(resource_, otterbrix_manager_->address(), std::move(files));
         assert(file_manager_ != nullptr && "file manager must not be null");
 
         // Integration S3 manager orchestrates the raw s3 + file connectors; the
         // Scheduler routes s3 CREATE EXTERNAL TABLE / COPY statements to it.
+        staging_file_manager_ = actor_zeta::spawn<conn::file::FileManager>(resource_, otterbrix_manager_->address(), staging_files);
         s3_integration_manager_ =
-            actor_zeta::spawn<db::S3Manager>(resource_, s3_manager_->address(), file_manager_->address());
+            actor_zeta::spawn<db::S3Manager>(resource_, s3_manager_->address(), staging_file_manager_->address(), staging_config.write_roots.front());
         assert(s3_integration_manager_ != nullptr && "s3 integration manager must not be null");
     }
 

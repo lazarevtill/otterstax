@@ -1,8 +1,10 @@
 # CLAUDE.md
 
-`service.security.files` parses absolute `read_roots` / `write_roots` and a
-positive `max_file_bytes` (default 64 MiB). The file-access policy validates roots
-and holds directory descriptors; SQL connector wiring supplies this policy.
+`service.security.files` contains absolute `read_roots` / `write_roots` sequences
+and a positive `max_file_bytes` (default 64 MiB). Keycloak mode defaults to denying
+SQL file access. Startup opens and validates roots against protected server paths;
+the YAML parser validates shape and scalar values. Trusted-private mode allows all
+directories but retains the encoded file-size bound. See `docs/deployment.md`.
 
 `service.security` carries the explicit `trusted_private` or `keycloak` mode,
 TLS file references and Keycloak introspection limits. Parsing retains an

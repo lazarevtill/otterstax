@@ -35,12 +35,19 @@ Unlike the SQL backends, these are `actor_zeta::actor_mixin` actors whose handle
   takes a **pre-parsed `OtterbrixStatementPtr`** (not a database/table), runs it through
   `db::OtterbrixManager::execute`, and writes the result chunk out in the requested format. Format
   translators live in `otterbrix/translators/{input,output}`.
+  Production SQL passes an explicit `security::file_access` policy. Imports read
+  through that policy's open descriptors; exports use its Arrow stream and publish
+  only after conversion succeeds. The path-taking translator APIs are for direct
+  library callers; the SQL file actor must never use them. S3 has a separate file
+  actor restricted to private tenant staging, so local SQL permissions do not
+  need to expose the staging directory. Temporary files use random names and an
+  exclusive create, with bounded writes and cleanup on failure.
 - **`conn::s3::ConnectorManager`** — credential store + S3 object I/O (`list`/`download`/`upload`) backed by
   Arrow's `S3FileSystem`. Credentials are registered per alias at startup from the `s3:` section of the
   connection config file (via `add_credentials`); there is no remove path. Every handler reports a typed
   `core::error_t`: `invalid_parameter` (empty alias / keys), `do_not_exists` (unknown alias), `io_error`
   (any Arrow S3 or local-file failure). A `download` that fails mid-transfer removes the partial local
-  file. Nothing here throws — Arrow reports through `Status`/`Result`. `db::S3Manager` (in
+  file. Arrow/file I/O reports through `Status`/`Result`. `db::S3Manager` (in
   `integration/s3`) bridges these two with the engine. Error paths: `tests/system/test_s3_errors.cpp`.
   The constructor calls `arrow::fs::EnsureS3Initialized()`; Arrow requires one matching `FinalizeS3()`
   before the process exits (otherwise it warns and may segfault during static teardown), and

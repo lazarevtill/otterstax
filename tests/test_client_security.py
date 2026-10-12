@@ -238,6 +238,7 @@ def run(server):
         config = {"service": {name: {"host": "127.0.0.1", "port": port} for name, port in ports.items()}}
         config["service"]["security"] = {
             "mode": "keycloak", "certificate_file": str(certificate), "private_key_file": str(private_key),
+            "files": {"read_roots": [str(imports)], "write_roots": [str(exports)], "max_file_bytes": 65536},
             "keycloak": {"issuer": issuer, "client_id": "tenant-database", "client_secret_env": "OTX_TEST_SECRET",
                          "ca_file": str(certificate), "request_timeout_ms": 300, "max_in_flight": 2},
         }
@@ -308,6 +309,35 @@ def run(server):
             check("psycopg: verified TLS and token authentication", original_postgres_client)
             check("Arrow Flight: verified TLS and bearer metadata", original_flight_client)
 
+            def authorized_file_sql():
+                import psycopg
+                with psycopg.connect(host="localhost", port=ports["postgres"], user="client", password=token,
+                                     dbname="test", sslmode="verify-full", sslrootcert=str(certificate),
+                                     autocommit=True, connect_timeout=10) as client:
+                    client.execute(f"CREATE EXTERNAL TABLE auth_files.people WITH (location = '{imports / 'people.csv'}', format = 'csv');")
+                    assert client.execute("SELECT * FROM auth_files.people ORDER BY id;").fetchall() == [(1, "Alice"), (2, "Bob")]
+                    client.execute(f"COPY (SELECT * FROM auth_files.people) TO '{exports / 'people.csv'}' WITH (format = 'csv');")
+                    assert "Alice" in (exports / "people.csv").read_text()
+                    denied_inputs = [root / "secret.csv", imports / "link.csv", imports / "large.csv",
+                                     imports / ".." / "secret.csv", root / "data" / "s3-staging" / "object.csv"]
+                    for index, path in enumerate(denied_inputs):
+                        try:
+                            client.execute(f"CREATE EXTERNAL TABLE auth_files.denied_{index} WITH (location = '{path}', format = 'csv');")
+                        except psycopg.Error:
+                            pass
+                        else:
+                            raise AssertionError(f"Unauthorized import succeeded: {path}")
+                    for path in [root / "secret.csv", imports / "people.csv", private_key]:
+                        before = path.read_bytes()
+                        try:
+                            client.execute(f"COPY (SELECT * FROM auth_files.people) TO '{path}' WITH (format = 'csv');")
+                        except psycopg.Error:
+                            pass
+                        else:
+                            raise AssertionError(f"Unauthorized export succeeded: {path}")
+                        assert path.read_bytes() == before
+
+            check("SQL file permissions: allowed import/export, forbidden paths, links, limits and private staging", authorized_file_sql)
 
             credentials = grpc.ssl_channel_credentials(root_certificates=certificate.read_bytes())
             for name, service, methods in (

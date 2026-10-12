@@ -29,7 +29,8 @@
 
 class ComponentManager {
 public:
-    ComponentManager(const configuration::config& config, const config::ConnectionsConfig& connections);
+    ComponentManager(const configuration::config& config, const config::ConnectionsConfig& connections,
+                     std::shared_ptr<const otterstax::security::file_access> files = {});
     ~ComponentManager();
     std::pmr::memory_resource* getResource();
     actor_zeta::address_t scheduler_address() const;
@@ -93,6 +94,9 @@ private:
         nullptr,
         actor_zeta::pmr::deleter_t{getResource()}};
     std::unique_ptr<conn::s3::ConnectorManager, actor_zeta::pmr::deleter_t> s3_manager_{
+        nullptr,
+        actor_zeta::pmr::deleter_t{getResource()}};
+    std::unique_ptr<conn::file::FileManager, actor_zeta::pmr::deleter_t> staging_file_manager_{
         nullptr,
         actor_zeta::pmr::deleter_t{getResource()}};
     // Integration-layer S3 orchestrator (download→add_file / dump_file→upload),

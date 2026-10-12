@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+File permissions are covered by `unit/config/test_file_access.cpp`,
+`system/test_file_authorization.cpp` (real imports and all export formats),
+and SQL checks in the protocol fixture.
+
 Client security claim/config tests live under `unit/config`. The standalone
 `test_client_security.py --server PATH` starts an owned server with a local HTTPS
 introspection fixture and tests actual MySQL, PostgreSQL, Flight and Spark traffic.

@@ -2,6 +2,7 @@
 // Copyright 2025-2026  OtterStax
 
 #include "manager.hpp"
+#include "security/file_access.hpp"
 #include "otterbrix/translators/error.hpp"
 #include "utility/logger.hpp"
 #include "utility/tracy_profiler.hpp"
@@ -17,7 +18,6 @@
 #include <arrow/result.h>
 #include <arrow/status.h>
 
-#include <ctime>
 #include <filesystem>
 #include <thread>
 
@@ -69,18 +69,6 @@ arrow::Status cp_impl(arrow::fs::FileSystem& src_fs,
     return arrow::Status::OK();
 }
 
-// Build a unique local filename for a downloaded object by prefixing the
-// object's basename with a timestamp, e.g.
-//   "bucket/data/costs.parquet" → "2026-05-23_10-34-35_costs.parquet"
-std::string timestamped_filename(const std::string& s3_path) {
-    std::time_t now = std::time(nullptr);
-    std::tm     tm{};
-    localtime_r(&now, &tm);
-    char ts[20];
-    std::strftime(ts, sizeof(ts), "%Y-%m-%d_%H-%M-%S", &tm);
-    return std::string{ts} + "_" + std::filesystem::path(s3_path).filename().string();
-}
-
 core::error_t unknown_alias(std::pmr::memory_resource* res, std::string_view op, const std::string& alias) {
     return tsl::make_error(res, core::error_code_t::do_not_exists,
                            std::string{op} + ": unknown alias '" + alias + "'");
@@ -104,11 +92,13 @@ connect_params stored_on(std::pmr::memory_resource* res, const connect_params& p
 
 // ── ConnectorManager ────────────────────────────────────────────────────────────────
 
-ConnectorManager::ConnectorManager(std::pmr::memory_resource* res, std::string_view s3_download_path)
+ConnectorManager::ConnectorManager(std::pmr::memory_resource* res, std::string_view s3_download_path,
+                                   std::shared_ptr<const otterstax::security::file_access> files)
     : resource_(res)
     , log_(get_logger(logger_tag::S3_MANAGER))
     , credentials_store_(res)
-    , s3_download_path_(s3_download_path, res) {
+    , s3_download_path_(s3_download_path, res)
+    , files_(files ? std::move(files) : std::make_shared<otterstax::security::file_access>(otterstax::security::file_access_config{}, true)) {
     assert(log_.is_valid());
     assert(res != nullptr);
     assert(!s3_download_path_.empty() && "s3 download path must not be empty");
@@ -235,21 +225,26 @@ ConnectorManager::download(session_hash_t id, std::string alias, std::string s3_
         co_return tsl::arrow_error(resource(), core::error_code_t::io_error, "download", fs_result.status());
     }
 
-    arrow::fs::LocalFileSystem local_fs;
-    const std::string local_path =
-        (std::filesystem::path(std::string_view{s3_download_path_}) / timestamped_filename(s3_path)).string();
-
-    auto status = cp_impl(**fs_result, s3_path, local_fs, local_path);
-    if (!status.ok()) {
-        // A transfer that failed mid-way has already created the destination;
-        // a truncated object must never be handed to the loader.
-        std::error_code ec;
-        std::filesystem::remove(local_path, ec);
-        co_return tsl::arrow_error(resource(), core::error_code_t::io_error, "download", status);
+    const auto basename = std::filesystem::path(s3_path).filename();
+    if (basename.empty() || basename == "." || basename == "..") {
+        co_return tsl::make_error(resource(), core::error_code_t::invalid_parameter, "download: object name is empty");
     }
-
-    log_->debug("download: s3://{} → {}", s3_path, local_path);
-    co_return std::pmr::string{std::string_view{local_path}, resource()};
+    auto input = (*fs_result)->OpenInputStream(s3_path);
+    if (!input.ok()) co_return tsl::arrow_error(resource(), core::error_code_t::io_error, "download", input.status());
+    const auto destination = (std::filesystem::path(std::string_view{s3_download_path_}) / basename).string();
+    auto output = files_->output(destination, true);
+    if (!output.ok()) co_return tsl::arrow_error(resource(), core::error_code_t::io_error, "download", output.status());
+    for (;;) {
+        auto buffer = (*input)->Read(1 << 20);
+        if (!buffer.ok()) co_return tsl::arrow_error(resource(), core::error_code_t::io_error, "download", buffer.status());
+        if ((*buffer)->size() == 0) break;
+        auto status = (*output)->Write((*buffer)->data(), (*buffer)->size());
+        if (!status.ok()) co_return tsl::arrow_error(resource(), core::error_code_t::io_error, "download", status);
+    }
+    auto committed = (*output)->commit();
+    if (!committed.ok()) co_return tsl::arrow_error(resource(), core::error_code_t::io_error, "download", committed);
+    log_->debug("download: s3://{} → {}", s3_path, (*output)->path());
+    co_return std::pmr::string{(*output)->path(), resource()};
 }
 
 actor_zeta::unique_future<core::result_wrapper_t<bool>>

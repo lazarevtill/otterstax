@@ -55,6 +55,10 @@ service:
       max_token_bytes: 16384
       max_response_bytes: 65536
       max_in_flight: 16
+    files:
+      read_roots: [/srv/imports]
+      write_roots: [/srv/exports]
+      max_file_bytes: 67108864
 ```
 
 The secret is read from the named environment variable, never from a literal
@@ -88,6 +92,34 @@ An accepted identity has access to the entire tenant instance, its catalog and
 configured backends. There are no per-user SQL roles or table grants. User-specified
 Kafka destinations still require an authorization boundary before admitting
 untrusted tenant operators.
+
+## SQL file permissions
+
+In Keycloak mode, local imports and exports require `service.security.files`
+permissions. Omitted or empty `read_roots` and `write_roots` deny that operation.
+Roots must be existing absolute directories, with no symbolic-link components.
+The server refuses roots that overlap its data directory, configuration file or
+configured TLS files. Give each tenant separate import/export directories owned
+by its server account; untrusted OS users must not be able to rename their entries.
+Do not place credentials or other private files inside an allowed root.
+
+Imports use descriptors opened relative to the configured directories. Parent
+traversal, symbolic links, hard links and non-regular files are refused. The
+converter receives bytes from that descriptor rather than reopening a checked
+pathname. `max_file_bytes` bounds input bytes and output bytes, with a default of
+64 MiB. It is not a query-memory or decompressed-Parquet-memory quota.
+
+Exports write a private file in the authorized destination directory, then sync
+and publish it atomically. A conversion or size-limit failure preserves an
+existing destination and removes the unfinished output. Published files have
+mode `0600`. A directory-sync failure is reported even if publication has occurred.
+Temporary exports use random names and never replace an existing destination.
+
+Trusted-private mode permits all local directories; file type checks, atomic
+exports and the configured size bound still apply. It is suitable only for trusted
+SQL clients. S3 uses a separate internal file manager and a private `s3-staging`
+directory under the tenant data directory, with the same size bound. SQL clients
+cannot use this internal manager to evade their local file permissions.
 
 `tests/test_client_security.py` exercises the actual server protocols against an
 HTTPS introspection fixture. `tests/test_keycloak_live.py` owns a separate local

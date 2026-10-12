@@ -9,6 +9,7 @@ set(${PROJECT_NAME}_SOURCES
     test_engine_join_behavior.cpp
     test_mixed_plan_engine.cpp
     test_file_ingestion.cpp
+    test_file_authorization.cpp
     test_kafka_runtime.cpp
     test_kafka_offsets.cpp
     test_kafka_recovery_errors.cpp

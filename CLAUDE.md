@@ -5,6 +5,11 @@ and verifies bearer access tokens on every gRPC call and native command. An
 accepted identity has full access to its tenant instance. See [deployment](docs/deployment.md)
 and [security internals](security/CLAUDE.md) for the current authorization boundaries.
 
+Keycloak SQL file access requires configured import/export roots. File operations
+use directory descriptors and atomic exports; S3 staging is private to each tenant's
+data directory. Deployment details live in `docs/deployment.md`.
+
+
 Engine storage and application logs use `--data-dir`, then `OTTERSTAX_DATA_DIR`,
 then `./data`. Docker images set `OTTERSTAX_DATA_DIR=/app/data`. Tenant instances
 must use separate storage and connector configuration. `--help` prints to stdout
