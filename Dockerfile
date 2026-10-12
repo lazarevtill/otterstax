@@ -5,6 +5,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONFAULTHANDLER=1
 
 ARG WITH_TRACY=false
+ARG BUILD_JOBS=0
+ARG BUILD_MEMORY_PER_JOB_MIB=1536
 
 RUN apt update && \
     apt upgrade -y && \
@@ -34,10 +36,13 @@ RUN rm /bin/sh && ln -s /bin/bash /bin/sh
 # cmake_layout places generators + libs at build/Release/ — matching the
 # devcontainer preset layout exactly.
 WORKDIR /app
+COPY cmake/build_jobs.py ./cmake/build_jobs.py
 COPY conanfile.py .
 COPY cmake/conan-recipes/otterbrix ./cmake/conan-recipes/otterbrix
 RUN conan export cmake/conan-recipes/otterbrix
-RUN if [ "$WITH_TRACY" = "true" ]; then \
+RUN _jobs=$(python3 cmake/build_jobs.py "${BUILD_JOBS}" --memory-per-job-mib "${BUILD_MEMORY_PER_JOB_MIB}") && \
+    printf '\ntools.build:jobs=%s\n' "${_jobs}" >> /root/.conan2/global.conf && \
+    if [ "$WITH_TRACY" = "true" ]; then \
         conan install conanfile.py --build missing \
             -s build_type=Release \
             -s compiler.cppstd=20 \
@@ -59,12 +64,13 @@ RUN if [ "$WITH_TRACY" = "true" ]; then \
     fi
 
 # Build tracy-capture CLI (headless, no GUI deps) when Tracy is enabled
-RUN if [ "$WITH_TRACY" = "true" ]; then \
+RUN _jobs=$(python3 cmake/build_jobs.py "${BUILD_JOBS}" --memory-per-job-mib "${BUILD_MEMORY_PER_JOB_MIB}") && \
+    if [ "$WITH_TRACY" = "true" ]; then \
         curl -L https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.tar.gz \
             | tar xz -C /tmp && \
         cmake -S /tmp/tracy-0.13.1/capture -B /tmp/tracy-capture-build \
             -DCMAKE_BUILD_TYPE=Release && \
-        cmake --build /tmp/tracy-capture-build -j$(nproc) && \
+        cmake --build /tmp/tracy-capture-build -j${_jobs} && \
         cp /tmp/tracy-capture-build/tracy-capture /usr/local/bin/ && \
         rm -rf /tmp/tracy-0.13.1 /tmp/tracy-capture-build; \
     fi
@@ -84,10 +90,11 @@ COPY ./cmake ./cmake
 COPY ./main.cpp ./main.cpp
 COPY ./CMakeLists.txt ./CMakeLists.txt
 
-RUN cmake -S . -B build/Release \
+RUN _jobs=$(python3 cmake/build_jobs.py "${BUILD_JOBS}" --memory-per-job-mib "${BUILD_MEMORY_PER_JOB_MIB}") && \
+    cmake -S . -B build/Release \
         -DCMAKE_TOOLCHAIN_FILE=build/Release/generators/conan_toolchain.cmake \
         -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build build/Release --target all -- -j 5
+    cmake --build build/Release --target all -- -j${_jobs}
 
 # Tracy profiler port (active only when built with --build-arg WITH_TRACY=true)
 EXPOSE 8086

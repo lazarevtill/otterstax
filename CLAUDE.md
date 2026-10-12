@@ -156,6 +156,10 @@ the VM's RAM is far smaller than the host's.
   - `./docker-run-tests.sh -j <JOBS>`
   - `./benchmark/scripts/run_benchmark.sh` / `run_stress_benchmarks.sh` already
     **auto-cap** to this formula when `-j` is omitted (see `run_benchmark.sh`).
+- Docker builds resolve `BUILD_JOBS=0` from container CPU and memory limits via
+  `cmake/build_jobs.py`, using `BUILD_MEMORY_PER_JOB_MIB` (default 1536). The same
+  cap applies to Conan dependencies, Tracy and the application build. An explicit
+  positive `BUILD_JOBS` overrides automatic sizing.
 - If a build still gets `Killed`/`ResourceExhausted`, halve `JOBS` or raise the
   Docker Desktop memory limit (Settings → Resources).
 

@@ -16,7 +16,7 @@ TRACY_SEP=false
 TRACY_OUTPUT_DIR=""
 TRACY_FILE=""
 TRACY_CAPTURE_CONTAINER=""
-BUILD_JOBS=0  # 0 means use nproc inside the container
+BUILD_JOBS=0  # 0 means derive the cap from container CPU and memory limits
 
 _usage() {
     cat <<'EOF'
