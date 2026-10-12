@@ -61,6 +61,7 @@ RUN_DISRUPTION = os.environ.get('OTTERSTAX_RUN_DISRUPTION') == '1'
 
 def _mysql_select_one(cfg):
     conn = mysql.connector.connect(
+        autocommit=True,
         host=cfg['host'], port=cfg['mysql_port'],
         user=cfg['user'], password=cfg['password'],
     )
@@ -158,6 +159,7 @@ def test_slow_query_does_not_block_others(cfg):
     def run(sql, label):
         t0 = time.monotonic()
         conn = mysql.connector.connect(
+            autocommit=True,
             host=cfg['host'], port=cfg['mysql_port'],
             user=cfg['user'], password=cfg['password'],
         )
@@ -209,6 +211,7 @@ def test_isolation_across_backends(cfg):
 
     def heavy():
         conn = mysql.connector.connect(
+            autocommit=True,
             host=cfg['host'], port=cfg['mysql_port'],
             user=cfg['user'], password=cfg['password'],
         )
