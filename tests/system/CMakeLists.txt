@@ -39,6 +39,7 @@ set(${PROJECT_NAME}_SOURCES
     test_spark_plan_execution.cpp
     test_prepare_plan.cpp
     test_constant_aggregates.cpp
+    test_expression_subqueries.cpp
     test_engine_transactions.cpp
 )
 

@@ -592,18 +592,15 @@ Worker::execute_prepared_statement(session_hash_t id, std::pmr::vector<types::lo
         // parameterized statement passes through it HERE rather than at parse
         // time: the parser leaves it unfinalized while any `$n` is unbound (an
         // early finalize records the failure and breaks every later bind). The
-        // plan it answers is dropped — every execution site builds its own from
-        // (node, params), because a backend manager may have replaced the root —
-        // but the lookups are a sibling of that root and travel no other way, so
-        // they are taken over onto the statement (OtterbrixStatement::catalog_resolves).
-        // Without them the engine runs this statement with no CHECK, PK or FK to
-        // enforce. Taken once per prepare: the entry is single-use, so nothing
-        // re-reads or re-appends them.
+        // complete plan is retained on the statement. execution_plan() combines
+        // its ordered subqueries and catalog lookups with the current main root,
+        // which backend managers may replace. Prepared entries are single-use.
         auto bind_res = binder.finalize();
         if (bind_res.has_error()) {
             co_return forward_error(resource(), bind_res.error(), "Argument binding failed: ");
         }
         data.otterbrix_params->catalog_resolves = bind_res.value().catalog_resolves;
+        data.otterbrix_params->transformed_plan.emplace(std::move(bind_res.value()));
     }
 
     co_return co_await execute_statement(id);

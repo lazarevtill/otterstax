@@ -273,24 +273,17 @@ components::cursor::cursor_t_ptr OtterbrixDataManager::execute_plan(OtterbrixSta
 
     // Before the engine sees it: an aggregate over constants would be folded once per chunk.
     // A backend's slice is already data here, so what a backend runs is not touched.
-    if (otterbrix_params->node) {
-        auto* resource = otterbrix_->dispatcher()->resource();
-        if (auto refused = guard_node(*otterbrix_params->node, otterbrix_params->params_node.get(), resource);
-            refused.contains_error()) {
-            return error_cursor(resource, refused);
+    auto plan = otterbrix_params->execution_plan();
+    auto* resource = otterbrix_->dispatcher()->resource();
+    for (const auto& node : plan.sub_queries) {
+        if (node) {
+            if (auto refused = guard_node(*node, plan.parameters.get(), resource);
+                refused.contains_error()) {
+                return error_cursor(resource, refused);
+            }
         }
     }
 
-    components::logical_plan::execution_plan_t plan(otterbrix_params->node->resource(),
-                                                    otterbrix_params->node,
-                                                    otterbrix_params->params_node);
-    // The plan is built around the statement's CURRENT root — a backend manager
-    // may have replaced it with fetched data — so the catalog lookups have to be
-    // put back by hand: they are a sibling of the root, not a node under it, and
-    // a plan built from (node, params) alone carries none. Copied, not moved:
-    // the same statement is planned once for its output schema and executed
-    // once, and both plans need them.
-    plan.catalog_resolves = otterbrix_params->catalog_resolves;
     return otterbrix_->dispatcher()->execute_plan(otterbrix::session_id_t(), std::move(plan));
 }
 
@@ -329,11 +322,7 @@ components::cursor::cursor_t_ptr OtterbrixDataManager::plan_output_schema(Otterb
     // the physical tree but scans nothing; validation stamps output_types() on
     // the statement's consumer node. The rendered plan text the cursor carries
     // is not the answer and is dropped.
-    logical_plan::execution_plan_t plan{resource, otterbrix_params->node, otterbrix_params->params_node};
-    // The statement's catalog lookups, as in execute_plan: validation resolves
-    // the same targets the execution will, and a constraint the plan does not
-    // name is one the validator cannot see.
-    plan.catalog_resolves = otterbrix_params->catalog_resolves;
+    auto plan = otterbrix_params->execution_plan();
     plan.explain = logical_plan::explain_type::plan;
     auto cursor = otterbrix_->dispatcher()->execute_plan(otterbrix::session_id_t(), std::move(plan));
     if (!cursor) {
