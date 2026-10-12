@@ -40,7 +40,14 @@ namespace frontend {
     }
 
     sql_session::result sql_session::control(const char* sql, const char* command, state next) {
-        auto value = submit(sql);
+        result value{session_payload{resource_}};
+        if (next == state::idle) {
+            auto [scheduled, future] = actor_zeta::send(scheduler_, &Scheduler::finish_transaction,
+                                                       context(), std::string_view{command} == "COMMIT");
+            value = await(std::move(future));
+        } else {
+            value = submit(sql);
+        }
         if (!value.has_error()) {
             state_ = next;
             value.value().transaction_command = command;
@@ -170,7 +177,7 @@ namespace frontend {
         // The engine may already have aborted a failed DML. ROLLBACK is
         // idempotent and also covers parse, bind, routing and encoding errors.
         if (!broken_) {
-            auto rollback = submit("ROLLBACK;");
+            auto rollback = control("ROLLBACK;", "ROLLBACK", state::idle);
             if (rollback.has_error()) broken_ = true;
         }
         state_ = state::failed;

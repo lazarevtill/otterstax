@@ -4,6 +4,8 @@
 #include "scheduler/scheduler.hpp"
 
 #include "otterbrix/parser/parser.hpp"
+#include "integration/sql/connection_manager.hpp"
+#include "integration/postgresql/connection_manager.hpp"
 #include "utility/logger.hpp"
 #include "utility/tracy_profiler.hpp"
 
@@ -29,6 +31,8 @@ Scheduler::Scheduler(std::pmr::memory_resource* res,
                      actor_zeta::address_t kafka_manager)
     : resource_(res)
     , log_(get_logger(logger_tag::SCHEDULER))
+    , sql_connection_manager_(sql_connection_manager)
+    , pg_connection_manager_(pg_connection_manager)
     , workers_(res)
     , worker_addresses_(res) {
     assert(log_.is_valid());
@@ -56,7 +60,8 @@ Scheduler::Scheduler(std::pmr::memory_resource* res,
                                                 catalog_manager,
                                                 s3_manager,
                                                 file_manager,
-                                                kafka_manager);
+                                                kafka_manager,
+                                                address());
         worker_addresses_.push_back(worker->address());
         workers_.push_back(std::move(worker));
     }
@@ -81,6 +86,10 @@ actor_zeta::behavior_t Scheduler::behavior(actor_zeta::mailbox::message* msg) {
         co_await actor_zeta::dispatch(this, &Scheduler::execute_prepared_statement, msg);
     } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::prepare_schema>) {
         co_await actor_zeta::dispatch(this, &Scheduler::prepare_schema, msg);
+    } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::enlist_transaction>) {
+        co_await actor_zeta::dispatch(this, &Scheduler::enlist_transaction, msg);
+    } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::finish_transaction>) {
+        co_await actor_zeta::dispatch(this, &Scheduler::finish_transaction, msg);
     } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::close_session>) {
         co_await actor_zeta::dispatch(this, &Scheduler::close_session, msg);
     } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::close_statement>) {
@@ -223,6 +232,12 @@ bool Scheduler::start_request(const execution_context& context) {
     return true;
 }
 
+actor_zeta::address_t Scheduler::connection_work::backend_address() const {
+    if (mysql) return mysql->address();
+    if (postgres) return postgres->address();
+    return actor_zeta::address_t::empty_address();
+}
+
 void Scheduler::finish_request(const execution_context& context) {
     if (!context.persistent) return;
     auto it = connections_.find(context.engine_session);
@@ -244,9 +259,80 @@ actor_zeta::unique_future<Scheduler::session_result> Scheduler::close_session(ex
         auto drained = work.drained->get_future();
         co_await std::move(drained);
     }
-    context.in_transaction = false;
-    const auto request = next_request_id();
-    auto result = co_await route(&Worker::execute, request, std::string{"ROLLBACK;"}, context);
+    auto result = co_await finish_transaction_impl(context, false);
     connections_.erase(key);
     co_return result;
+}
+
+actor_zeta::unique_future<core::result_wrapper_t<actor_zeta::address_t>>
+Scheduler::enlist_transaction(execution_context context, backend_type_t backend, std::string alias) {
+    auto found = connections_.find(context.engine_session);
+    if (!context.persistent || !context.in_transaction || found == connections_.end()) {
+        co_return core::error_t{core::error_code_t::invalid_parameter,
+            std::pmr::string{"Transaction has no persistent connection session", resource()}};
+    }
+    auto& work = found->second;
+    if (work.participant != backend_type_t::Unknown) {
+        if (work.participant == backend && work.alias == alias) co_return work.backend_address();
+        co_return core::error_t{core::error_code_t::unimplemented_yet,
+            std::pmr::string{"A transaction cannot span different storage participants", resource()}};
+    }
+    if (backend == backend_type_t::MySQL) {
+        auto [scheduled, future] = actor_zeta::send(sql_connection_manager_, &db::MySQLManager::begin_transaction,
+                                                   context.engine_session, alias);
+        auto outcome = co_await std::move(future);
+        if (outcome.has_error()) co_return outcome.convert_error<actor_zeta::address_t>();
+        work.mysql = std::move(outcome.value());
+    } else if (backend == backend_type_t::PostgreSQL) {
+        auto [scheduled, future] = actor_zeta::send(pg_connection_manager_, &db::PostgressManager::begin_transaction,
+                                                   context.engine_session, alias);
+        auto outcome = co_await std::move(future);
+        if (outcome.has_error()) co_return outcome.convert_error<actor_zeta::address_t>();
+        work.postgres = std::move(outcome.value());
+    } else if (backend != backend_type_t::Otterbrix) {
+        co_return core::error_t{core::error_code_t::unimplemented_yet,
+            std::pmr::string{"Backend does not support transactions", resource()}};
+    }
+    work.participant = backend;
+    work.alias = std::move(alias);
+    co_return work.backend_address();
+}
+
+actor_zeta::unique_future<Scheduler::session_result>
+Scheduler::finish_transaction(execution_context context, bool commit) {
+    if (!start_request(context)) {
+        co_return core::error_t{core::error_code_t::invalid_parameter,
+            std::pmr::string{"Connection session is closing or already executing a request", resource()}};
+    }
+    auto result = co_await finish_transaction_impl(context, commit);
+    finish_request(context);
+    co_return result;
+}
+
+actor_zeta::unique_future<Scheduler::session_result>
+Scheduler::finish_transaction_impl(execution_context context, bool commit) {
+    auto& work = connections_.at(context.engine_session);
+    const auto participant = work.participant;
+    const bool remote = participant == backend_type_t::MySQL || participant == backend_type_t::PostgreSQL;
+    context.in_transaction = false;
+    // For remote transactions the engine only planned/combined results. Finish
+    // that read-only session first; its failure must prevent the remote commit.
+    auto local = co_await route(&Worker::execute, next_request_id(),
+        std::string{commit && !remote ? "COMMIT;" : "ROLLBACK;"}, context);
+    core::error_t remote_error = core::error_t::no_error();
+    if (participant == backend_type_t::MySQL) {
+        auto [scheduled, future] = actor_zeta::send(work.backend_address(), &db::MySQLManager::finish_transaction,
+                                                   context.engine_session, commit && !local.has_error());
+        remote_error = co_await std::move(future);
+    } else if (participant == backend_type_t::PostgreSQL) {
+        auto [scheduled, future] = actor_zeta::send(work.backend_address(), &db::PostgressManager::finish_transaction,
+                                                   context.engine_session, commit && !local.has_error());
+        remote_error = co_await std::move(future);
+    }
+    work.participant = backend_type_t::Unknown;
+    work.alias.clear();
+    work.mysql.reset();
+    work.postgres.reset();
+    if (remote_error.contains_error()) co_return remote_error;
+    co_return local;
 }

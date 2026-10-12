@@ -23,7 +23,7 @@ is the only actor that frontends talk to directly.
   connections can progress on the same Worker.
 
 Query handlers route to a `Worker` and return its result. Scheduler also owns
-persistent connection lifetimes.
+persistent connection lifetimes and their transaction participants.
 
 ## Scheduler entry points
 
@@ -55,10 +55,14 @@ current context, rather than reusing the transaction state from prepare time.
 
 Scheduler owns the count of outstanding requests per full persistent session
 identity. `close_session(context)` refuses new work for that closing session,
-waits for outstanding work, rolls back through the Worker and removes the entry.
+waits for outstanding work, rolls back storage and removes the entry.
 A frontend timing out and abandoning its future does not cancel that cleanup.
-The Worker rejects remote execution and external side effects in local
-transactions before sending work to their managers.
+Workers enlist one local engine or remote alias before execution and schema
+probes. Scheduler owns each remote transaction's dedicated integration actor;
+the context carries only its address by value. `finish_transaction` ends the
+engine's planning session, completes remote commit/rollback and destroys that
+actor after its work drains. Cross-participant and unsupported side effects
+are refused before dispatch. See `docs/transactions.md` for the storage contract.
 
 ## Worker pipeline
 

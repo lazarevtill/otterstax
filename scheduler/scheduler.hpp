@@ -14,6 +14,11 @@
 #include <memory>
 #include <memory_resource>
 
+namespace db {
+    class MySQLManager;
+    class PostgressManager;
+}
+
 // Scheduler — a thin session-affinity router over a pool of Worker actors,
 // modelled on otterbrix's services::dispatcher::manager_dispatcher_t.
 //
@@ -76,6 +81,8 @@ public:
     // its engine session. A timed-out caller may drop its future; cleanup still
     // runs on the Scheduler after the request actually finishes.
     unique_future<session_result> close_session(execution_context context);
+    unique_future<core::result_wrapper_t<actor_zeta::address_t>> enlist_transaction(execution_context context, backend_type_t backend, std::string alias);
+    unique_future<session_result> finish_transaction(execution_context context, bool commit);
     // Pre-built plans (the Spark Connect frontend translates a DataFrame
     // relation straight into a logical plan): execute runs it like a parsed
     // statement, prepare describes its result schema without running it.
@@ -88,6 +95,8 @@ public:
                                                         &Scheduler::prepare_schema,
                                                         &Scheduler::close_statement,
                                                         &Scheduler::close_session,
+                                                        &Scheduler::enlist_transaction,
+                                                        &Scheduler::finish_transaction,
                                                         &Scheduler::execute_plan,
                                                         &Scheduler::prepare_plan>;
 
@@ -100,6 +109,11 @@ private:
     struct connection_work {
         size_t pending{0};
         bool closing{false};
+        backend_type_t participant{backend_type_t::Unknown};
+        std::string alias;
+        std::unique_ptr<db::MySQLManager, actor_zeta::pmr::deleter_t> mysql{nullptr, actor_zeta::pmr::deleter_t{std::pmr::new_delete_resource()}};
+        std::unique_ptr<db::PostgressManager, actor_zeta::pmr::deleter_t> postgres{nullptr, actor_zeta::pmr::deleter_t{std::pmr::new_delete_resource()}};
+        actor_zeta::address_t backend_address() const;
         std::optional<actor_zeta::promise<bool>> drained;
     };
     std::unordered_map<session_id, connection_work> connections_;
@@ -108,6 +122,7 @@ private:
     std::unordered_map<session_hash_t, std::deque<actor_zeta::promise<bool>>> request_lanes_;
     bool start_request(const execution_context& context);
     void finish_request(const execution_context& context);
+    unique_future<session_result> finish_transaction_impl(execution_context context, bool commit);
     // Keep messages for one prepared ID ordered, forward to its Worker, and
     // release the next message only after the current result is complete.
     template<typename Method, typename... Args>
@@ -115,6 +130,8 @@ private:
 
     std::pmr::memory_resource* resource_;
     log_t log_;
+    actor_zeta::address_t sql_connection_manager_;
+    actor_zeta::address_t pg_connection_manager_;
 
     std::pmr::vector<std::unique_ptr<Worker, actor_zeta::pmr::deleter_t>> workers_;
     std::pmr::vector<actor_zeta::address_t> worker_addresses_;

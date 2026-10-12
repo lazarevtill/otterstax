@@ -70,7 +70,8 @@ public:
            actor_zeta::address_t catalog_manager,
            actor_zeta::address_t s3_manager,
            actor_zeta::address_t file_manager,
-           actor_zeta::address_t kafka_manager);
+           actor_zeta::address_t kafka_manager,
+           actor_zeta::address_t transaction_coordinator);
 
     std::pmr::memory_resource* resource() const noexcept { return resource_; }
 
@@ -119,6 +120,7 @@ private:
     actor_zeta::address_t s3_manager_;   // db::S3Manager (s3 external tables / COPY)
     actor_zeta::address_t file_manager_; // conn::file::FileManager (local external tables / COPY)
     actor_zeta::address_t kafka_manager_;
+    actor_zeta::address_t transaction_coordinator_;
     std::pmr::unordered_map<session_hash_t, metadata_t> metadata_map_;
 
     // The parser boundary: the one place that may throw, converted to error_t
@@ -134,6 +136,8 @@ private:
     // the result schema from the plan and the backends' describe probes,
     // without executing the statement; the entry stays for execute or close.
     unique_future<session_result> describe_parsed(session_hash_t id, ParsedQueryDataPtr parsed_data);
+
+    unique_future<core::error_t> enlist_transaction(ParsedQueryData& data, backend_type_t backend);
 
     // Backend slices first (each inlines its rows as node_raw_data), then the
     // engine; the result is built from the session's stored schema/tag.
