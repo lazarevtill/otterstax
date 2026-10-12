@@ -24,10 +24,12 @@ namespace otterstax::kafka::detail {
     // only (the default) -> plain assign()/unassign()
     struct offset_rebalance_cb final : RdKafka::RebalanceCb {
         std::map<int32_t, int64_t> committed_offsets; // partition -> next offset to read
+        uint64_t generation{0};
 
         void rebalance_cb(RdKafka::KafkaConsumer* consumer,
                           RdKafka::ErrorCode err,
                           std::vector<RdKafka::TopicPartition*>& partitions) override {
+            ++generation;
             if (err == RdKafka::ERR__ASSIGN_PARTITIONS) {
                 for (auto* tp : partitions) {
                     if (auto it = committed_offsets.find(tp->partition()); it != committed_offsets.end()) {
@@ -57,7 +59,8 @@ namespace otterstax::kafka::detail {
 
         // We own offset persistence (offsets table) -> no broker auto-commit
         if (!set("bootstrap.servers", config.bootstrap_servers) || !set("group.id", config.group_id) ||
-            !set("auto.offset.reset", config.offset_reset) || !set("enable.auto.commit", "false")) {
+            !set("auto.offset.reset", config.offset_reset) || !set("enable.auto.commit", "false") ||
+            !set("isolation.level", "read_committed")) {
             return consumer_error("config: " + errstr);
         }
         if (conf->set("rebalance_cb", rebalance_cb.get(), errstr) != RdKafka::Conf::CONF_OK) {
@@ -82,7 +85,20 @@ namespace otterstax::kafka::detail {
         , topic_(std::move(topic)) {}
 
     kafka_consumer_t::kafka_consumer_t(kafka_consumer_t&&) noexcept = default;
-    kafka_consumer_t& kafka_consumer_t::operator=(kafka_consumer_t&&) noexcept = default;
+    kafka_consumer_t& kafka_consumer_t::operator=(kafka_consumer_t&& other) noexcept {
+        if (this != &other) {
+            if (consumer_) {
+                consumer_->close();
+            }
+            // close() can invoke the old callback; destroy the old consumer
+            // before replacing its callback owner.
+            consumer_.reset();
+            rebalance_cb_ = std::move(other.rebalance_cb_);
+            consumer_ = std::move(other.consumer_);
+            topic_ = std::move(other.topic_);
+        }
+        return *this;
+    }
 
     kafka_consumer_t::~kafka_consumer_t() {
         if (consumer_) {
@@ -98,7 +114,14 @@ namespace otterstax::kafka::detail {
         const auto timeout_ms = to_ms(timeout);
 
         while (batch.size() < max_records) {
+            const auto generation = rebalance_cb_->generation;
             std::unique_ptr<RdKafka::Message> msg(consumer_->consume(timeout_ms));
+            if (generation != rebalance_cb_->generation) {
+                // A reassignment resumes at the last durable checkpoint. The
+                // partial batch from the previous assignment is not committed
+                // and will be delivered again; never mix the two assignments.
+                batch.clear();
+            }
             switch (msg->err()) {
                 case RdKafka::ERR_NO_ERROR:
                     batch.push_back(kafka_record_t{std::string(static_cast<const char*>(msg->payload()), msg->len()),
@@ -118,6 +141,14 @@ namespace otterstax::kafka::detail {
         OTX_ZONE_N("kafka::consumer::commit");
         if (consumer_) {
             consumer_->commitSync();
+        }
+    }
+
+    void kafka_consumer_t::remember_committed(const std::vector<kafka_record_t>& batch) {
+        OTX_ZONE_N("kafka::consumer::remember_committed");
+        for (const auto& record : batch) {
+            auto& offset = rebalance_cb_->committed_offsets[record.partition];
+            offset = std::max(offset, record.offset + 1);
         }
     }
 

@@ -64,7 +64,7 @@ Library: `kafka_runtime` (links `kafka_grammar` + `otterbrix_local`).
 |------|--------------|
 | `kafka_consumer.{hpp,cpp}` | RAII over `RdKafka::KafkaConsumer`. `poll_batch`, `commit` (broker-group resume), and the exactly-once helpers `send_offsets_to_transaction(producer&, batch, …)` + `seek_to_batch_start` (rewind on abort). All RdKafka pointer ownership is confined here. |
 | `kafka_producer.{hpp,cpp}` | RAII over `RdKafka::Producer` (`acks=all` + `enable.idempotence`). Optional `transactional_id` ⇒ exactly-once (`init_transactions` + `begin/send_offsets_to_transaction/commit/abort`). Used by INSERT→topic and STREAM output. |
-| `kafka_poller.{hpp,cpp}` | Per-SOURCE `std::thread`: poll → `json_to_chunk` → `ingest_at_least_once` / `ingest_transactional` (free functions returning the engine's `core::error_t`, testable broker-free) → commit only on success. A failed batch is logged with its code, the consumer is rewound to the batch start and the batch is retried after a capped exponential pause (`batch_retry_backoff`). |
+| `kafka_poller.{hpp,cpp}` | Per-SOURCE `std::thread`: poll → `json_to_chunk` → `ingest_at_least_once` / `ingest_transactional` (free functions returning the engine's `core::error_t`, testable broker-free) → commit only on success. A failed batch is logged with its code; its original records are retained and retried after a capped exponential pause (`batch_retry_backoff`) before polling later records. |
 | `kafka_stream.{hpp,cpp}` | Per-STREAM continuous-query `std::thread`: poll → node-swap transform (`aggregate(empty)+[raw_data, <operators>]`) → `chunk_matches_columns` against the stream's declared output columns → produce. `TRANSACTIONAL=true` ⇒ the producer runs each batch in a transaction (exactly-once). A batch failing at any step (transform error, schema mismatch, produce) is never committed: rewind + capped backoff, like the poller. |
 | `kafka_reader.{hpp,cpp}` | Pure/broker-free conversions + engine helpers: `json_to_chunk` / `chunk_to_json`, `chunk_matches_columns` (write-path schema guard — round-trips the rows through the declared columns), `kafka_insert`, `kafka_query` / `kafka_query_session` (parse SQL + send to the dispatcher; the session variant shares ONE engine transaction across calls — used by exactly-once), `kafka_parse_plan` / `kafka_execute`, `write_offsets` / `parse_offsets`, `stream_output_schema` (computes a STREAM's projected schema via `schema_utils::aggregate_filter_schema`, since the engine drops the schema of a projection over an empty result). |
 
@@ -78,6 +78,10 @@ a `kafka_node_t` plan root → `KafkaManager::execute`; else `kafka_write_target
 `co_await`ed.
 
 ## Constraints / conventions
+
+- Consumers use `read_committed` isolation. The SOURCE refreshes the positions
+  used for reassignments after each successful engine commit; a rebalance during
+  polling discards the incomplete batch from the old assignment.
 
 - The grammar reserves `partition` → the offsets column is `partition_id`.
 - `INSERT INTO kafka.<obj>` produces to the object's topic (SOURCE and STREAM

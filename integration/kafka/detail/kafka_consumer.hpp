@@ -56,6 +56,10 @@ namespace otterstax::kafka::detail {
         // Commit consumed offsets to the broker (group coordination)
         void commit();
 
+        // Refresh the engine-committed positions used by later reassignments.
+        // Called on the polling thread only, after the engine COMMIT succeeds.
+        void remember_committed(const std::vector<kafka_record_t>& batch);
+
         // Exactly-once: add this batch's positions (last offset + 1 per partition) to
         // `producer`'s open transaction, tagged with this consumer's group metadata, so
         // the produce and the source-offset advance commit atomically. All RdKafka
