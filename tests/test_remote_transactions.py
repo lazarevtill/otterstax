@@ -88,6 +88,9 @@ def check_connection_loss(protocol, ports, backend, label):
         while True:
             # Only terminate the active UPDATE of this fixture's unique table.
             if backend.kind == "postgresql":
+                # This observer retains a row lock in an open transaction.
+                # Refresh activity so an early poll cannot hide the later UPDATE.
+                backend.sql("SELECT pg_stat_clear_snapshot()")
                 victims = backend.sql("SELECT pid FROM pg_stat_activity WHERE pid <> pg_backend_pid() "
                     "AND state='active' AND query LIKE %s", (f'UPDATE %"{backend.table}"%',))
             else:
