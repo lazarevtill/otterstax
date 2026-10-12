@@ -19,6 +19,10 @@ namespace frontend::postgres {
 
     void postgres_connection::handle_startup_message(int32_t protocol_version, packet_reader& reader) {
         OTX_ZONE_N("pg::handle_startup_message");
+        if (authentication_required() && !encrypted()) {
+            send_error_response(sql_state::INVALID_AUTHORIZATION, "TLS is required", error_severity::fatal());
+            return;
+        }
         log_->info("[Connection {}]: Client protocol version: {}", connection_id_, protocol_version);
         while (reader.remaining()) {
             std::string key = reader.read_string_null();
@@ -58,6 +62,18 @@ namespace frontend::postgres {
             return;
         }
 
+        if (authentication_required()) {
+            state_ = connection_state::AUTH;
+            writer_.reserve_payload(4);
+            writer_.write_int32(3); // AuthenticationCleartextPassword, inside TLS only.
+            send_packet(writer_.build_from_payload(message_type::backend::AUTHENTICATION));
+            return;
+        }
+        finish_authentication();
+    }
+
+    void postgres_connection::finish_authentication() {
+        state_ = connection_state::COMMAND;
         std::vector<std::vector<uint8_t>> msg;
         msg.reserve(INITIAL_MESSAGES_COUNT);
         msg.emplace_back(build_auth_ok(writer_));
@@ -79,14 +95,16 @@ namespace frontend::postgres {
         send_packet_merged(std::move(msg)); // send packet & begin message-handling loop
     }
 
-    void postgres_connection::handle_ssl_decline(frontend::postgres::packet_reader& reader) {
-        OTX_ZONE_N("pg::handle_ssl_decline");
-        std::vector<uint8_t> negative(1);
-        negative[0] = 'N';
-
-        log_->info("[Connection {}] Sent SSL decline ('N'), waiting for StartupMessage", connection_id_);
-        send_packet(std::move(negative), false);
-        read_initial_message();
+    void postgres_connection::handle_ssl_request(frontend::postgres::packet_reader& reader) {
+        if (reader.remaining() != 0 || encrypted()) {
+            send_error_response(sql_state::PROTOCOL_VIOLATION, "Invalid SSLRequest", error_severity::fatal());
+            return;
+        }
+        if (tls_available()) {
+            send_then({'S'}, [this] { start_tls([this] { read_initial_message(); }); });
+        } else {
+            send_then({'N'}, [this] { read_initial_message(); });
+        }
     }
 
     void postgres_connection::handle_query(std::string query) {

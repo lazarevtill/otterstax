@@ -57,6 +57,11 @@ namespace frontend::spark {
     SparkConnectServiceImpl::handle_config(agrpc::ServerRPC<&sc::SparkConnectService::AsyncService::RequestConfig>& rpc,
                                            sc::ConfigRequest& request) {
         sc::ConfigResponse response;
+        if (!request.has_operation() || request.operation().op_type_case() == sc::ConfigRequest::Operation::OP_TYPE_NOT_SET) {
+            co_await rpc.finish(response, grpc::Status{grpc::StatusCode::INVALID_ARGUMENT,
+                                                       "Config requires an operation"});
+            co_return;
+        }
         {
             OTX_ZONE_N("SparkConnectServiceImpl::handle_config");
             response.set_session_id(request.session_id());

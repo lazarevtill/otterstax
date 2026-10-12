@@ -35,6 +35,7 @@ namespace frontend {
         std::chrono::milliseconds accept_retry_delay;
         size_t pool_size = std::thread::hardware_concurrency();
         std::string host = "0.0.0.0";
+        std::shared_ptr<const otterstax::security::server_access> access;
     };
 
     template<typename DerivedConnection>
@@ -50,6 +51,7 @@ namespace frontend {
             , scheduler_(config.scheduler)
             , read_timeout_(config.read_timeout)
             , accept_retry_delay_(config.accept_retry_delay)
+            , access_(config.access)
             , log_(get_logger(logger_tag::FRONTEND_SERVER)) {
             assert(log_.is_valid());
             assert(resource_ != nullptr && "memory resource must not be null");
@@ -153,6 +155,7 @@ namespace frontend {
                                                                                   *slot,
                                                                                   read_timeout_);
                     log_->debug("Connection accepted (slot {})", *slot);
+                    connection_pool_[*slot]->set_access(access_);
                     connection_pool_[*slot]->start();
                 }
             } catch (const std::exception& e) {
@@ -245,6 +248,7 @@ namespace frontend {
         std::atomic<uint32_t> next_connection_id_;
         std::chrono::milliseconds read_timeout_;
         std::chrono::milliseconds accept_retry_delay_;
+        std::shared_ptr<const otterstax::security::server_access> access_;
         std::vector<std::unique_ptr<DerivedConnection>> connection_pool_;
         std::queue<size_t> available_slots_;
         log_t log_;

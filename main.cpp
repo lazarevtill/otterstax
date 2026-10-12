@@ -90,6 +90,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     config::ServiceConfig server_config = std::move(loaded.value());
+    std::shared_ptr<const otterstax::security::server_access> access;
+    try {
+        access = otterstax::security::make_server_access(server_config.security);
+    } catch (const std::exception& error) {
+        log->error("Cannot initialize client security: {}", error.what());
+        return 1;
+    }
+
     // ComponentManager spawns the s3 connector actor, which initialises Arrow's
     // S3 subsystem; the process owes Arrow a FinalizeS3 before exit on every
     // path below, including the aborted-startup returns. Declared before the
@@ -128,6 +136,7 @@ int main(int argc, char* argv[]) {
         .scheduler_address = cmanager.scheduler_address(),
         .catalog_address = cmanager.catalog_address(),
         .threads = std::max<std::size_t>(2, std::thread::hardware_concurrency()),
+        .access = access,
     };
 
     flight::server::flight_sql_server flight(flight_config);
@@ -140,6 +149,7 @@ int main(int argc, char* argv[]) {
         .read_timeout = std::chrono::seconds(frontend::CONNECTION_TIMEOUT_SEC),
         .accept_retry_delay = std::chrono::milliseconds(frontend::ACCEPT_RETRY_DELAY_MS),
         .host = server_config.mysql.host,
+        .access = access,
     };
 
     // Start MySQL server
@@ -156,6 +166,7 @@ int main(int argc, char* argv[]) {
         .read_timeout = std::chrono::seconds(frontend::CONNECTION_TIMEOUT_SEC),
         .accept_retry_delay = std::chrono::milliseconds(frontend::ACCEPT_RETRY_DELAY_MS),
         .host = server_config.postgres.host,
+        .access = access,
     };
 
     // Start Postgres server
@@ -171,12 +182,16 @@ int main(int argc, char* argv[]) {
         .resource = cmanager.getResource(),
         .scheduler_address = cmanager.scheduler_address(),
         .aliases = &cmanager.aliases(),
+        .access = access,
     };
 
     log->info("Spark Connect Server running on port {}...", spark_config.port);
     OTX_MESSAGE_L("startup: spark connect server starting");
     frontend::spark::spark_connect_server spark_server(spark_config);
-    spark_server.start();
+    if (!spark_server.start()) {
+        log->error("Spark Connect server failed to start on {}:{}", spark_config.host, spark_config.port);
+        return 1;
+    }
 
     // Start the Flight SQL server and block on it until SIGTERM/SIGINT —
     // the signal stops the grpc server and the GrpcContext, run() returns

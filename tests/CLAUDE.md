@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+Client security claim/config tests live under `unit/config`. The standalone
+`test_client_security.py --server PATH` starts an owned server with a local HTTPS
+introspection fixture and tests actual MySQL, PostgreSQL, Flight and Spark traffic.
+`test_keycloak_live.py --server PATH --network NAME --keycloak-image IMAGE` runs
+inside a Docker-capable integration client on that network and owns a separate
+temporary Keycloak container. Both generate their own credentials and storage.
+These suites require a local server binary; do not point them at deployed services.
+
+
 `system/test_kafka_recovery_errors.cpp` covers invalid persisted registries,
 missing checkpoints, worker startup errors, offsets-name collisions and duplicate
 or mismatched SOURCE/STREAM DDL. Failed operations must preserve existing data.

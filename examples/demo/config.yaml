@@ -3,6 +3,7 @@
 # container at the server's default config path and read once at startup.
 
 service:
+  security: { mode: trusted_private }
   flight_sql:
     host: "0.0.0.0"
     port: 8815

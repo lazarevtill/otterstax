@@ -76,12 +76,15 @@ namespace frontend::mysql {
         {
             HANDSHAKE,
             AUTH,
+            AUTH_TOKEN,
             COMMAND
         };
 
         void send_handshake();
 
         void handle_auth(std::vector<uint8_t> payload);
+        void handle_auth_token(std::vector<uint8_t> payload);
+        void reject_authentication();
         void handle_command(std::vector<uint8_t> payload);
         void handle_query(std::string query);
         void try_fix_variable_set_query(std::string_view query, std::string error);

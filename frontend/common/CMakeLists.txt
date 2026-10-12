@@ -23,6 +23,7 @@ add_library(common_server
 )
 
 target_link_libraries(common_server PUBLIC
+    client_security
     Boost::boost
     otterbrix::otterbrix
     actor-zeta::actor-zeta

@@ -118,7 +118,8 @@ namespace frontend::postgres {
         void read_initial_message();
         // `reader` stands after the protocol version the caller dispatched on.
         void handle_startup_message(int32_t protocol_version, packet_reader& reader);
-        void handle_ssl_decline(packet_reader& reader);
+        void handle_ssl_request(packet_reader& reader);
+        void finish_authentication();
         void handle_query(std::string query);
         // Answers a transaction statement of a simple Query from
         // transaction_manager: one the engine ran (`error` empty: BEGIN,
@@ -168,6 +169,7 @@ namespace frontend::postgres {
         transaction_manager transaction_man_;
         pipeline_state pipeline_;
         bool use_protocol_3_2_;
+        connection_state state_{connection_state::HANDSHAKE};
         log_t log_;
     };
 } // namespace frontend::postgres

@@ -7,8 +7,19 @@ not-before claim. No positive results are cached. Secrets come from an environme
 variable named in configuration. Never log tokens, secrets, form bodies or provider
 responses.
 
-`transport` builds TLS and gRPC credentials. Policy construction rejects a
-missing deployment mode. Keycloak mode requires TLS; trusted-private
+`transport` builds TLS and gRPC credentials before the engine/listeners start.
+Missing deployment mode fails startup. Keycloak mode requires TLS; trusted-private
 mode explicitly admits all network clients. Each gRPC call is checked by the
 credentials' AuthMetadataProcessor. Its AuthContext is connection-shared and must
 not store per-call identity or tokens.
+
+The native frontends upgrade their existing socket after the protocol SSL request.
+All later reads and writes use the TLS stream. Every callback, including upgrade
+and post-write continuations, retains the existing connection lifetime accounting.
+MySQL uses mysql_clear_password; PostgreSQL uses PasswordMessage. These carry
+pre-acquired access tokens inside TLS. Both check the token again before new commands.
+
+See `docs/deployment.md` for configuration, authorization boundaries and client
+requirements. Claim parser/config tests live in `tests/unit/config`; real protocol
+and live-provider tests are `tests/test_client_security.py` and
+`tests/test_keycloak_live.py`.

@@ -8,6 +8,7 @@
 # restart to change them.
 
 service:
+  security: { mode: trusted_private }
   flight_sql:
     host: "0.0.0.0"
     port: 8815

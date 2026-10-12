@@ -2,11 +2,11 @@
 
 `service.security` carries the explicit `trusted_private` or `keycloak` mode,
 TLS file references and Keycloak introspection limits. Parsing retains an
-unspecified mode when configuration omits it; security policy construction rejects that
-mode. Keycloak mode requires issuer,
+unspecified mode when configuration omits it; executable startup rejects that
+mode before creating the engine or listeners. Keycloak mode requires issuer,
 client ID, secret environment-variable name and both TLS files. TLS credential
 loading and HTTPS client initialization belong to `security/`, not this parser.
-
+See `docs/deployment.md` for the full format and authorization boundaries.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -155,12 +155,14 @@ from `WORKDIR /app/build/Release` with no `--config`, so it reads
   (`examples/demo/compose.yml`, `compose.yml`, `benchmark/compose_benchmark.yml`).
   A mount overrides anything baked in.
 
-A missing file loads default ports and no connections.
+A missing file loads default ports and no connections, but executable startup
+requires `service.security.mode` before the engine or listeners start.
 
 ## config.yaml format
 
 ```yaml
 service:
+  security: { mode: trusted_private }
   flight_sql: { host: "0.0.0.0", port: 8815 }
   mysql:      { port: 8816 }        # wire-server port
   postgres:   { port: 8817 }        # wire-server port

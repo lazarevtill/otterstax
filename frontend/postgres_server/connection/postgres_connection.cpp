@@ -101,7 +101,8 @@ namespace frontend::postgres {
         // As in PostgreSQL, a type byte the protocol does not define means the
         // message boundaries are lost: FATAL and close, without waiting for
         // the body the length announces.
-        if (!is_frontend_message_type(static_cast<char>(header[0]))) {
+        if ((state_ == connection_state::AUTH && header[0] != 'p') ||
+            (state_ != connection_state::AUTH && !is_frontend_message_type(static_cast<char>(header[0])))) {
             send_error_response(sql_state::PROTOCOL_VIOLATION,
                                 "invalid frontend message type " + std::to_string(header[0]),
                                 error_severity::fatal());
@@ -113,6 +114,11 @@ namespace frontend::postgres {
             return false;
         }
         size -= 4;
+        if (state_ == connection_state::AUTH && size > access_->max_token_bytes + 1) {
+            send_error_response(sql_state::INVALID_AUTHORIZATION, "Access token exceeds the configured limit",
+                                error_severity::fatal());
+            return false;
+        }
 
         return true;
     }
@@ -130,9 +136,7 @@ namespace frontend::postgres {
         arm_read_timeout("initial message");
 
         // size is 4, without char noting message type
-        boost::asio::async_read(
-            socket_,
-            boost::asio::buffer(read_buffer_.data(), 4),
+        read_transport(boost::asio::buffer(read_buffer_.data(), 4),
             safe_callback([this](boost::system::error_code ec, std::size_t length) {
                 cancel_read_timeout();
                 if (closed()) {
@@ -144,11 +148,11 @@ namespace frontend::postgres {
                 }
 
                 auto msg_length = merge_data_bytes<uint32_t, endian::BIG>(read_buffer_, 0);
-                std::cout << "Initial message length: " + std::to_string(msg_length) << std::endl;
+                log_->trace("[Connection {}] initial message length: {}", connection_id_, msg_length);
 
                 if (msg_length < 4 || msg_length > MAX_PACKET_SIZE) {
                     send_error_response(sql_state::PROTOCOL_VIOLATION,
-                                        "Invalid message length: " + std::to_string(length),
+                                        "Invalid message length: " + std::to_string(msg_length),
                                         error_severity::fatal());
                     return;
                 }
@@ -161,9 +165,7 @@ namespace frontend::postgres {
                 }
 
                 arm_read_timeout("initial message body");
-                boost::asio::async_read(
-                    socket_,
-                    boost::asio::buffer(read_buffer_.data(), msg_length),
+                read_transport(boost::asio::buffer(read_buffer_.data(), msg_length),
                     safe_callback([this, msg_length](boost::system::error_code ec, std::size_t length) {
                         cancel_read_timeout();
                         if (closed()) {
@@ -186,7 +188,7 @@ namespace frontend::postgres {
                                                 "Truncated startup message: no protocol version",
                                                 error_severity::fatal());
                         } else if (code == message_code::SSL_REQUEST_CODE) {
-                            handle_ssl_decline(reader);
+                            handle_ssl_request(reader);
                         } else if (code == message_code::PROTOCOL_VERSION_3_0) {
                             handle_startup_message(code, reader);
                         } else {
@@ -202,6 +204,25 @@ namespace frontend::postgres {
         OTX_ZONE_N("pg::handle_packet");
         assert(header.size() == 5);
         auto message_type = static_cast<char>(header[0]);
+        if (state_ == connection_state::AUTH) {
+            packet_reader reader(std::move(payload));
+            auto token = reader.read_string_null();
+            if (message_type != 'p' || !reader.ok() || reader.remaining() != 0 ||
+                verify_token(token).status != otterstax::security::token_status::accepted) {
+                send_error_response(sql_state::INVALID_AUTHORIZATION, "Access token is invalid or unavailable",
+                                    error_severity::fatal());
+                return;
+            }
+            access_token_ = std::move(token);
+            finish_authentication();
+            return;
+        }
+        if (authentication_required() && message_type != message_type::frontend::TERMINATE &&
+            verify_token(access_token_).status != otterstax::security::token_status::accepted) {
+            send_error_response(sql_state::INVALID_AUTHORIZATION, "Access token is invalid or unavailable",
+                                error_severity::fatal());
+            return;
+        }
         // A failed pipeline discards every message up to its Sync, which sends
         // the single ReadyForQuery; Terminate still ends the connection.
         if (pipeline_.has_error() && message_type != message_type::frontend::SYNC &&
@@ -465,8 +486,7 @@ namespace frontend::postgres {
             // FATAL closes the connection: a broken startup, a message type the
             // protocol does not define, a transport error, exhausted resources —
             // never a malformed message of a known type after startup.
-            send_packet(build_error_response(writer_, sqlstate, std::move(message), severity), false);
-            finish();
+            send_then(build_error_response(writer_, sqlstate, std::move(message), severity), [this] { finish(); });
             return;
         }
 

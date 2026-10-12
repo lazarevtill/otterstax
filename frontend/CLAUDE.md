@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+All four frontends receive the immutable client access policy created by main.
+Keycloak mode requires TLS and verifies tokens before protocol operations.
+Native TLS negotiation uses the shared transport and callback lifetime accounting;
+gRPC credentials authenticate each call. See [security](../security/CLAUDE.md).
+
+
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Role

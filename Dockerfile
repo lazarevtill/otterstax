@@ -74,6 +74,7 @@ COPY ./config ./config
 COPY ./connectors ./connectors
 COPY ./integration ./integration
 COPY ./frontend/ ./frontend
+COPY ./security ./security
 COPY ./otterbrix ./otterbrix
 COPY ./component_manager ./component_manager
 COPY ./scheduler ./scheduler

@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+Client security is configured by `service.security`. Keycloak mode requires TLS
+and verifies bearer access tokens on every gRPC call and native command. An
+accepted identity has full access to its tenant instance. See [deployment](docs/deployment.md)
+and [security internals](security/CLAUDE.md) for the current authorization boundaries.
+
 Engine storage and application logs use `--data-dir`, then `OTTERSTAX_DATA_DIR`,
 then `./data`. Docker images set `OTTERSTAX_DATA_DIR=/app/data`. Tenant instances
 must use separate storage and connector configuration. `--help` prints to stdout
@@ -7,7 +12,6 @@ and exits before creating storage or starting loggers.
 The server exclusively locks its data directory before starting loggers or the
 engine. A second server using that directory fails startup. Native listeners
 accept `service.mysql.host` and `service.postgres.host` as IP addresses.
-
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -36,12 +40,14 @@ The path comes from the `--config PATH` flag (default `config.yaml`), resolved
 - **bind-mounting** a stack-specific `config.yaml` onto that path (compose files)
   — a mount overrides anything baked in.
 
-A missing file → the server starts with default ports and no connections.
+A missing file loads default ports and no connections, but executable startup requires
+`service.security.mode` to explicitly select `trusted_private` or `keycloak`.
 
 ### File format
 
 ```yaml
 service:
+  security: { mode: trusted_private }
   flight_sql: { host: "0.0.0.0", port: 8815 }
   mysql:      { port: 8816 }      # wire-server port (NOT a backend)
   postgres:   { port: 8817 }      # wire-server port (NOT a backend)
@@ -100,7 +106,7 @@ main.cpp
   for the first incomplete entry, malformed port or non-scalar field**; a file
   that is not YAML is a `conversion_failure`. Nothing in `config/` throws: the
   yaml-cpp calls are the only throwing sites and each is converted where it is
-  made (`config/yaml_scalar.hpp`, `YAML::LoadFile` in `ConfigReader::load`).
+  made (`config/yaml_scalar.hpp`, `YAML::Load` in `ConfigReader::load`).
   `main.cpp` logs the error and returns 1, so an invalid connection aborts
   startup rather than coming up half-configured.
 - Registration lives in `ComponentManager::register_connections` (it owns the
@@ -148,7 +154,6 @@ the VM's RAM is far smaller than the host's.
 
 ```bash
 # Install Conan deps
-# IMPORTANT: if conanfile.py changed, remove ./build first before re-running
 conan export cmake/conan-recipes/otterbrix
 conan install conanfile.py --build missing -s build_type=Release
 

@@ -21,15 +21,23 @@ namespace frontend::mysql {
     void mysql_connection::handle_auth(std::vector<uint8_t> payload) {
         OTX_ZONE_N("mysql::handle_auth");
         if (payload.size() < MIN_AUTH_PAYLOAD_SIZE) {
-            log_->info("[Connection {}] AUTH: Payload too small", connection_id_);
-            send_error(mysql_error::ER_ACCESS_DENIED_ERROR, "Access denied for user (using password: NO)");
+            reject_authentication();
             return;
         }
 
+        const auto payload_size = payload.size();
         packet_reader reader(std::move(payload));
 
         uint32_t client_flags = reader.read_uint32();
-        log_->info("[Connection {}] AUTH: flags=0x{:x}", connection_id_, client_flags);
+        if ((client_flags & CLIENT_SSL) && !encrypted()) {
+            if (payload_size != MIN_AUTH_PAYLOAD_SIZE || !tls_available()) { reject_authentication(); return; }
+            start_tls([this] { read_packet(); });
+            return;
+        }
+        if (authentication_required() && (!encrypted() || !(client_flags & CLIENT_PLUGIN_AUTH))) {
+            reject_authentication();
+            return;
+        }
 
         if (!(client_flags & CLIENT_PROTOCOL_41)) {
             send_error(mysql_error::ER_NOT_SUPPORTED_AUTH_MODE,
@@ -44,7 +52,7 @@ namespace frontend::mysql {
         //                send_error(mysql_error::ER_ACCESS_DENIED_ERROR, "max_packet_size exceeds maximum allowed (0xFFFFFF)");
         //                return;
         //            }
-        client_max_packet_size_ = max_packet_size;
+        client_max_packet_size_ = max_packet_size == 0 ? DEFAULT_MAX_PACKET_SIZE : max_packet_size;
 
         uint8_t charset = reader.read_uint8();
         log_->info("[Connection {}] AUTH: charset={}", connection_id_, static_cast<int>(charset));
@@ -55,19 +63,17 @@ namespace frontend::mysql {
         }
 
         reader.skip_bytes(AUTH_FILLER_SIZE); // filler
-        log_->info("[Connection {}] AUTH: user='{}'", connection_id_, reader.read_string_null());
-
-        std::vector<uint8_t> password;
-        if (reader.remaining() > 0) {
-            uint8_t auth_length = reader.read_uint8();
-            log_->info("[Connection {}] AUTH: auth_len={}", connection_id_, static_cast<int>(auth_length));
-
-            if (auth_length > 0 && auth_length <= reader.remaining()) {
-                password.resize(auth_length);
-                for (int i = 0; i < auth_length; ++i) {
-                    password[i] = reader.read_uint8();
-                }
+        reader.read_string_null(); // User identity comes from the verified token.
+        if (client_flags & (CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA | CLIENT_SECURE_CONNECTION)) {
+            const auto auth_length = (client_flags & CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA)
+                ? reader.read_length_encoded_integer() : reader.read_uint8();
+            if (!reader.ok() || auth_length > reader.remaining()) {
+                send_malformed_packet_error("Malformed HandshakeResponse authentication data");
+                return;
             }
+            reader.skip_bytes(static_cast<size_t>(auth_length));
+        } else {
+            reader.read_string_null();
         }
 
         std::string requested_database;
@@ -89,10 +95,36 @@ namespace frontend::mysql {
             return;
         }
 
-        // skip auth
+        if (authentication_required()) {
+            writer_.reserve_payload(32);
+            writer_.write_uint8(0xfe); // AuthSwitchRequest
+            writer_.write_string_null("mysql_clear_password");
+            writer_.write_uint8(0); // No challenge data for bearer tokens.
+            state_ = connection_state::AUTH_TOKEN;
+            send_packet(writer_.build_from_payload(sequence_id_++));
+            return;
+        }
         state_ = connection_state::COMMAND;
         log_->info("[Connection {}] AUTH: Success -> COMMAND state", connection_id_);
         send_packet(build_ok(writer_, sequence_id_));
+    }
+
+    void mysql_connection::reject_authentication() {
+        send_then(build_error(writer_, sequence_id_++, mysql_error::ER_ACCESS_DENIED_ERROR,
+                              "A valid bearer access token over TLS is required"), [this] { finish(); });
+    }
+
+    void mysql_connection::handle_auth_token(std::vector<uint8_t> payload) {
+        packet_reader reader(std::move(payload));
+        auto token = reader.read_string_null();
+        if (!reader.ok() || reader.remaining() != 0 ||
+            verify_token(token).status != otterstax::security::token_status::accepted) {
+            reject_authentication();
+            return;
+        }
+        access_token_ = std::move(token);
+        state_ = connection_state::COMMAND;
+        send_packet(build_ok(writer_, sequence_id_++));
     }
 
     void mysql_connection::handle_command(std::vector<uint8_t> payload) {
@@ -103,6 +135,11 @@ namespace frontend::mysql {
         }
 
         auto cmd = static_cast<server_command>(payload[0]);
+        if (cmd != COM_QUIT && authentication_required() &&
+            verify_token(access_token_).status != otterstax::security::token_status::accepted) {
+            reject_authentication();
+            return;
+        }
         switch (cmd) {
             case COM_QUIT:
                 log_->info("[Connection {}] COM_QUIT", connection_id_);
