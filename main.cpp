@@ -132,6 +132,7 @@ int main(int argc, char* argv[]) {
         .scheduler = cmanager.scheduler_address(),
         .read_timeout = std::chrono::seconds(frontend::CONNECTION_TIMEOUT_SEC),
         .accept_retry_delay = std::chrono::milliseconds(frontend::ACCEPT_RETRY_DELAY_MS),
+        .host = server_config.mysql.host,
     };
 
     // Start MySQL server
@@ -147,6 +148,7 @@ int main(int argc, char* argv[]) {
         .scheduler = cmanager.scheduler_address(),
         .read_timeout = std::chrono::seconds(frontend::CONNECTION_TIMEOUT_SEC),
         .accept_retry_delay = std::chrono::milliseconds(frontend::ACCEPT_RETRY_DELAY_MS),
+        .host = server_config.postgres.host,
     };
 
     // Start Postgres server

@@ -17,6 +17,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <vector>
 
 namespace frontend {
@@ -33,6 +34,7 @@ namespace frontend {
         // configuration error (asserted).
         std::chrono::milliseconds accept_retry_delay;
         size_t pool_size = std::thread::hardware_concurrency();
+        std::string host = "0.0.0.0";
     };
 
     template<typename DerivedConnection>
@@ -41,7 +43,7 @@ namespace frontend {
         explicit frontend_server(const frontend_server_config& config)
             : resource_(config.resource)
             , thread_pool_manager_(config.pool_size)
-            , acceptor_(thread_pool_manager_.ctx(), {boost::asio::ip::tcp::v4(), config.port})
+            , acceptor_(thread_pool_manager_.ctx(), {boost::asio::ip::make_address(config.host), config.port})
             , reject_packet_(DerivedConnection::build_too_many_connections_error())
             , accept_retry_timer_(thread_pool_manager_.ctx())
             , next_connection_id_(1)
@@ -64,6 +66,7 @@ namespace frontend {
         // The port the acceptor is bound to — the actual one when the config
         // asked for port 0.
         uint16_t local_port() const { return acceptor_.local_endpoint().port(); }
+        boost::asio::ip::address local_address() const { return acceptor_.local_endpoint().address(); }
 
         void start() {
             accept_connections();

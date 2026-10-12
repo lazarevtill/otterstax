@@ -9,12 +9,50 @@
 #include "utility/tracy_profiler.hpp"
 
 #include <fstream>
+#include <algorithm>
+#include <filesystem>
 #include <utility>
+#include <boost/asio/ip/address.hpp>
 
 
 #include <yaml-cpp/yaml.h>
 
 namespace config {
+
+namespace {
+    core::result_wrapper_t<std::string> listen_address(const YAML::Node& node, std::string_view field,
+                                                      std::pmr::memory_resource* resource) {
+        auto host = yaml_scalar<std::string>(node, field, resource);
+        if (host.has_error()) return host;
+        boost::system::error_code error;
+        boost::asio::ip::make_address(host.value(), error);
+        if (error) {
+            return core::error_t{core::error_code_t::invalid_parameter,
+                                 std::pmr::string{"field '" + std::string(field) + "': must be an IPv4 or IPv6 address", resource}};
+        }
+        return host;
+    }
+
+    core::error_t invalid_field(std::string_view field, std::string_view reason,
+                                std::pmr::memory_resource* resource) {
+        return core::error_t{core::error_code_t::invalid_parameter,
+                             std::pmr::string{"field '" + std::string(field) + "': " + std::string(reason), resource}};
+    }
+
+    core::result_wrapper_t<uint16_t> service_port(const YAML::Node& node, std::string_view field,
+                                                 std::pmr::memory_resource* resource) {
+        auto port = yaml_scalar<int64_t>(node, field, resource);
+        if (port.has_error()) {
+            return port.convert_error<uint16_t>();
+        }
+        if (port.value() < 1 || port.value() > 65535) {
+            return invalid_field(field, "must be an integer in 1..65535", resource);
+        }
+        return static_cast<uint16_t>(port.value());
+    }
+
+
+}
 
     ConfigReader::ConfigReader(std::pmr::memory_resource* resource)
         : resource_(resource)
@@ -22,13 +60,6 @@ namespace config {
 
 core::result_wrapper_t<ServiceConfig> ConfigReader::load(const std::string& config_path) {
     OTX_ZONE_N("config::ConfigReader::load");
-    std::ifstream file(config_path);
-    if (!file.good()) {
-        log_->warn("Configuration file '{}' not found. Using default values (no connections).", config_path);
-        return ServiceConfig{};
-    }
-    file.close();
-
     // Every failure is logged once here, under the config logger, before it is
     // handed to the caller as the result.
     const auto failed = [&](core::error_t error) -> core::result_wrapper_t<ServiceConfig> {
@@ -36,24 +67,59 @@ core::result_wrapper_t<ServiceConfig> ConfigReader::load(const std::string& conf
         return std::move(error);
     };
 
-    // LoadFile is a yaml-cpp call: a file that is not YAML is reported as the
-    // parser's own message, converted here.
+    std::error_code path_error;
+    const auto entry = std::filesystem::symlink_status(config_path, path_error);
+    if (entry.type() == std::filesystem::file_type::not_found &&
+        (!path_error || path_error == std::errc::no_such_file_or_directory)) {
+        log_->warn("Configuration file '{}' not found. Using default values (no connections).", config_path);
+        return ServiceConfig{};
+    }
+    if (path_error || !std::filesystem::is_regular_file(config_path, path_error)) {
+        return failed(core::error_t{core::error_code_t::io_error,
+                                    std::pmr::string{"configuration path is not a readable regular file: " + config_path,
+                                                     resource_}});
+    }
+    std::ifstream file(config_path);
+    if (!file.is_open()) {
+        return failed(core::error_t{core::error_code_t::io_error,
+                                    std::pmr::string{"cannot open configuration file: " + config_path, resource_}});
+    }
+
+    // Parse the stream we opened, without reopening the path between checks.
     YAML::Node config;
     try {
-        config = YAML::LoadFile(config_path);
+        config = YAML::Load(file);
     } catch (const YAML::Exception& e) {
         return failed(core::error_t(core::error_code_t::conversion_failure,
                                     std::pmr::string{("malformed configuration file '" + config_path + "': " + e.what()).c_str(),
                                                      resource_}));
     }
+    if (file.bad()) {
+        return failed(core::error_t{core::error_code_t::io_error,
+                                    std::pmr::string{"cannot read configuration file: " + config_path, resource_}});
+    }
 
     ServiceConfig server_config;
+    if (config.IsNull()) {
+        return server_config;
+    }
+    if (!config.IsMap()) {
+        return failed(invalid_field("configuration", "must be a mapping", resource_));
+    }
 
     // Wire-server settings live under the top-level `service:` key so they never
     // collide with the backend sections under `connections:` (both use the names
     // mysql/postgres). `service.mysql`/`service.postgres` are wire ports;
     // `connections.mysql`/`connections.postgresql` are remote backends.
     if (const auto service = config["service"]) {
+        if (!service.IsMap()) {
+            return failed(invalid_field("service", "must be a mapping", resource_));
+        }
+        for (const auto* section : {"flight_sql", "mysql", "postgres", "spark_connect", "connection_retry"}) {
+            if (const auto node = service[section]; node && !node.IsMap()) {
+                return failed(invalid_field(std::string{"service."} + section, "must be a mapping", resource_));
+            }
+        }
         if (service["flight_sql"]) {
             auto flight_sql = parseFlightSqlConfig(service["flight_sql"], resource_);
             if (flight_sql.has_error()) {
@@ -131,7 +197,7 @@ core::result_wrapper_t<FlightSqlConfig> ConfigReader::parseFlightSqlConfig(const
     }
 
     if (config["port"]) {
-        auto port = yaml_scalar<int>(config["port"], "service.flight_sql.port", resource);
+        auto port = service_port(config["port"], "service.flight_sql.port", resource);
         if (port.has_error()) {
             return port.convert_error<FlightSqlConfig>();
         }
@@ -145,8 +211,14 @@ core::result_wrapper_t<MysqlConfig> ConfigReader::parseMysqlConfig(const YAML::N
                                                                    std::pmr::memory_resource* resource) {
     MysqlConfig mysql_config;
 
+    if (config["host"]) {
+        auto host = listen_address(config["host"], "service.mysql.host", resource);
+        if (host.has_error()) return host.convert_error<MysqlConfig>();
+        mysql_config.host = std::move(host.value());
+    }
+
     if (config["port"]) {
-        auto port = yaml_scalar<int>(config["port"], "service.mysql.port", resource);
+        auto port = service_port(config["port"], "service.mysql.port", resource);
         if (port.has_error()) {
             return port.convert_error<MysqlConfig>();
         }
@@ -160,8 +232,14 @@ core::result_wrapper_t<PostgresConfig> ConfigReader::parsePostgresConfig(const Y
                                                                          std::pmr::memory_resource* resource) {
     PostgresConfig postgres_config;
 
+    if (config["host"]) {
+        auto host = listen_address(config["host"], "service.postgres.host", resource);
+        if (host.has_error()) return host.convert_error<PostgresConfig>();
+        postgres_config.host = std::move(host.value());
+    }
+
     if (config["port"]) {
-        auto port = yaml_scalar<int>(config["port"], "service.postgres.port", resource);
+        auto port = service_port(config["port"], "service.postgres.port", resource);
         if (port.has_error()) {
             return port.convert_error<PostgresConfig>();
         }
@@ -184,7 +262,7 @@ core::result_wrapper_t<SparkConnectConfig> ConfigReader::parseSparkConnectConfig
     }
 
     if (config["port"]) {
-        auto port = yaml_scalar<int>(config["port"], "service.spark_connect.port", resource);
+        auto port = service_port(config["port"], "service.spark_connect.port", resource);
         if (port.has_error()) {
             return port.convert_error<SparkConnectConfig>();
         }
@@ -204,6 +282,9 @@ core::result_wrapper_t<ConnectionRetryConfig> ConfigReader::parseConnectionRetry
             return max_attempts.convert_error<ConnectionRetryConfig>();
         }
         retry.max_attempts = max_attempts.value();
+        if (retry.max_attempts < 1) {
+            return invalid_field("service.connection_retry.max_attempts", "must be at least 1", resource);
+        }
     }
 
     if (config["delay_ms"]) {
@@ -212,6 +293,9 @@ core::result_wrapper_t<ConnectionRetryConfig> ConfigReader::parseConnectionRetry
             return delay_ms.convert_error<ConnectionRetryConfig>();
         }
         retry.delay_ms = delay_ms.value();
+        if (retry.delay_ms < 0) {
+            return invalid_field("service.connection_retry.delay_ms", "must not be negative", resource);
+        }
     }
 
     return retry;

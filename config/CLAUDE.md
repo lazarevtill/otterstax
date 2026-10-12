@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `config/` is the configuration layer. There is **one config file** (`config.yaml`)
 that carries both the wire-server settings **and**, under a `connections:` key,
 every remote backend and s3 alias. It is parsed by `ConfigReader` (built into the
-`config` target, `config::config`), which depends only on `yaml-cpp` (plus
-`spdlog`/otterbrix logging) — **no connector dependencies**.
+`config` target, `config::config`), which uses `yaml-cpp`, Boost address parsing,
+and `spdlog`/otterbrix logging. It has no connector dependencies.
 
 The `connections:` section is the **single source of truth for connections**;
 there is no runtime add/remove API. To change connections, edit `config.yaml` and
@@ -37,19 +37,25 @@ Nothing in `config/` throws. Every entry point returns a
 
 | Failure | Code | Message names |
 |---------|------|---------------|
-| file is not YAML (`YAML::LoadFile` refuses it) | `conversion_failure` | the path + yaml-cpp's own message |
+| an existing path that is not a readable regular file, including a broken symlink | `io_error` | the path |
+| file is not YAML (`YAML::Load` refuses it) | `conversion_failure` | the path + yaml-cpp's own message |
 | a `service.*` value that cannot be read as its type (`port: abc`) | `invalid_parameter` | the field (`service.mysql.port`) |
 | a connection field that is not a scalar (`host: [a, b]`) | `invalid_parameter` | the section + entry position + field |
 | an incomplete connection entry, or a malformed backend port | `invalid_parameter` | the section + `alias='…'` + the missing field / bad port |
 | a backend alias that is not an unquoted SQL identifier (`[a-z_][a-z0-9_]*`), or one another backend entry already uses | `invalid_parameter` | the section + `alias='…'` + the rule, or the section that already uses it |
 
-The yaml-cpp calls (`YAML::LoadFile`, `Node::as<T>()`) are the only throwing
+The yaml-cpp calls (`YAML::Load`, `Node::as<T>()`) are the only throwing
 sites; each is wrapped in a try/catch exactly where it is made and converted to
 the value above (`yaml_scalar.hpp` for `as<T>()`, `ConfigReader::load` for
-`LoadFile`). Error messages live on the `std::pmr::memory_resource*` passed to
+`YAML::Load` of the opened stream). A missing path selects defaults; access and
+read failures do not. Error messages live on the `std::pmr::memory_resource*` passed to
 `ConfigReader` / `parse_connections` — there is no default resource.
 
 ## Types
+
+MySQL and PostgreSQL listeners accept `service.mysql.host` and
+`service.postgres.host` as IPv4 or IPv6 addresses (default `0.0.0.0`). Invalid
+addresses fail configuration loading. Ports use the existing `port` fields.
 
 - `config::ServiceConfig` — `{ FlightSqlConfig flight_sql; MysqlConfig mysql;
   PostgresConfig postgres; SparkConnectConfig spark_connect;
@@ -141,7 +147,7 @@ from `WORKDIR /app/build/Release` with no `--config`, so it reads
   (`examples/demo/compose.yml`, `compose.yml`, `benchmark/compose_benchmark.yml`).
   A mount overrides anything baked in.
 
-A missing file → the server starts with default ports and no connections.
+A missing file loads default ports and no connections.
 
 ## config.yaml format
 
@@ -171,6 +177,9 @@ is optional (defaults to `max_attempts: 1`, `delay_ms: 1000` = one-shot), and so
 is `spark_connect` (defaults to `0.0.0.0:15002`, either key alone overriding its
 own default).
 Malformed YAML → the server aborts startup (`conversion_failure` from `load`).
+The root, `service`, and each configured service section must be mappings.
+Service ports are integers in 1..65535; retry attempts must be positive and
+retry delay nonnegative. These checks run before values reach the listeners.
 
 Wire-server settings live under the top-level `service:` node so they never
 collide with the backends under `connections:` — `service.mysql`/`service.postgres`

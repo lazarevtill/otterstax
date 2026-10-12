@@ -17,6 +17,7 @@ target_link_libraries(
     config::config
     otterbrix::otterbrix
     Catch2::Catch2
+    Boost::filesystem
 )
 
 if(ENABLE_TRACY)

@@ -23,10 +23,12 @@ struct FlightSqlConfig {
 
 struct MysqlConfig {
     uint16_t port = 8816;
+    std::string host = "0.0.0.0";
 };
 
 struct PostgresConfig {
     uint16_t port = 8817;
+    std::string host = "0.0.0.0";
 };
 
 struct SparkConnectConfig {
