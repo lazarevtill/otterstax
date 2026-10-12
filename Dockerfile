@@ -38,8 +38,10 @@ RUN rm /bin/sh && ln -s /bin/bash /bin/sh
 WORKDIR /app
 COPY cmake/build_jobs.py ./cmake/build_jobs.py
 COPY conanfile.py .
-COPY cmake/conan-recipes/otterbrix ./cmake/conan-recipes/otterbrix
-RUN conan export cmake/conan-recipes/otterbrix
+COPY cmake/conan-recipes ./cmake/conan-recipes
+RUN conan export cmake/conan-recipes/otterbrix && \
+    conan export cmake/conan-recipes/odbc && \
+    conan export cmake/conan-recipes/snowflake-odbc
 RUN _jobs=$(python3 cmake/build_jobs.py "${BUILD_JOBS}" --memory-per-job-mib "${BUILD_MEMORY_PER_JOB_MIB}") && \
     printf '\ntools.build:jobs=%s\n' "${_jobs}" >> /root/.conan2/global.conf && \
     if [ "$WITH_TRACY" = "true" ]; then \

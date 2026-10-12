@@ -168,6 +168,8 @@ the VM's RAM is far smaller than the host's.
 ```bash
 # Install Conan deps
 conan export cmake/conan-recipes/otterbrix
+conan export cmake/conan-recipes/odbc
+conan export cmake/conan-recipes/snowflake-odbc
 conan install conanfile.py --build missing -s build_type=Release
 
 # Configure
