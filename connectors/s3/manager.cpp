@@ -6,6 +6,7 @@
 #include "otterbrix/translators/error.hpp"
 #include "utility/logger.hpp"
 #include "utility/tracy_profiler.hpp"
+#include "utility/s3_transport.hpp"
 
 // Clash between otterbrix parser macros and Arrow headers
 #undef DAY
@@ -39,9 +40,10 @@ make_s3fs(const connect_params& creds) {
 
     if (!creds.endpoint.empty()) {
         opts.endpoint_override = std::string_view{creds.endpoint};
-        // Disable virtual addressing for custom endpoints (e.g. LocalStack)
-        opts.scheme = "http";
     }
+    opts.scheme = std::string_view{creds.scheme};
+    opts.tls_ca_file_path = std::string_view{creds.ca_file};
+    opts.tls_verify_certificates = true;
 
     return arrow::fs::S3FileSystem::Make(opts);
 }
@@ -85,6 +87,8 @@ connect_params stored_on(std::pmr::memory_resource* res, const connect_params& p
         .session_token = std::pmr::string{std::string_view{params.session_token}, res},
         .endpoint = std::pmr::string{std::string_view{params.endpoint}, res},
         .alias = std::pmr::string{std::string_view{params.alias}, res},
+        .scheme = std::pmr::string{std::string_view{params.scheme}, res},
+        .ca_file = std::pmr::string{std::string_view{params.ca_file}, res},
     };
 }
 
@@ -160,6 +164,10 @@ ConnectorManager::add_credentials(session_hash_t /*id*/, connect_params params) 
         co_return tsl::make_error(resource(), core::error_code_t::invalid_parameter,
                                   "add_credentials: access_key and secret_key are required for alias '" +
                                       std::string{std::string_view{params.alias}} + "'");
+    }
+
+    if (auto invalid = otterstax::validate_s3_transport(params.scheme, params.endpoint, params.ca_file)) {
+        co_return tsl::make_error(resource(), core::error_code_t::invalid_parameter, *invalid);
     }
 
     auto it = credentials_store_.find(std::string_view{params.alias});

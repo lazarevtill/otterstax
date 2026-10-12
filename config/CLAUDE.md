@@ -6,6 +6,11 @@ SQL file access. Startup opens and validates roots against protected server path
 the YAML parser validates shape and scalar values. Trusted-private mode allows all
 directories but retains the encoded file-size bound. See `docs/deployment.md`.
 
+S3 entries default to `scheme: https`; `ca_file` optionally supplies a PEM trust
+bundle. `endpoint` is a host/port, not a URL. Local HTTP fixtures opt in explicitly.
+`access_key_env`, `secret_key_env` and `session_token_env` resolve populated
+environment variables at startup and cannot coexist with their inline fields.
+
 `service.security` carries the explicit `trusted_private` or `keycloak` mode,
 TLS file references and Keycloak introspection limits. Parsing retains an
 unspecified mode when configuration omits it; executable startup rejects that

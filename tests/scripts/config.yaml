@@ -61,3 +61,4 @@ connections:
       secret_key: minioadmin
       region: us-east-1
       endpoint: rustfs:9000
+      scheme: http

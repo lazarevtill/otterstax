@@ -50,3 +50,4 @@ connections:
       secret_key: minioadmin
       region: us-east-1
       endpoint: 127.0.0.1:3206
+      scheme: http

@@ -4,6 +4,7 @@
 #include "config/config.hpp"
 #include "tests/temporary_directory.hpp"
 #include "config/connections/connection_config_reader.hpp"
+#include "utility/s3_transport.hpp"
 
 #include <catch2/catch_all.hpp>
 #include <yaml-cpp/yaml.h>

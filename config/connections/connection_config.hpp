@@ -51,6 +51,8 @@ struct S3CredentialDesc {
     std::string region;         // optional
     std::string session_token;  // optional — for IAM roles
     std::string endpoint;       // optional — for MinIO / custom S3-compatible endpoints
+    std::string scheme{"https"};
+    std::string ca_file;        // optional PEM trust bundle; otherwise system trust
 };
 
 // Aggregate parsed from the connection config file: the single source of truth

@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+`test_s3_tls.py --server PATH` owns an HTTPS object fixture and checks S3
+CA/hostname validation, environment credentials and private staging cleanup.
+
 File permissions are covered by `unit/config/test_file_access.cpp`,
 `system/test_file_authorization.cpp` (real imports and all export formats),
 and SQL checks in the protocol fixture.

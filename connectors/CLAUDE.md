@@ -42,6 +42,10 @@ Unlike the SQL backends, these are `actor_zeta::actor_mixin` actors whose handle
   actor restricted to private tenant staging, so local SQL permissions do not
   need to expose the staging directory. Temporary files use random names and an
   exclusive create, with bounded writes and cleanup on failure.
+  S3 transport preserves HTTPS for custom endpoints, applies an optional CA bundle,
+  and always verifies certificates. Only an explicit `scheme: http` selects
+  plaintext. Connector credential registration validates transport settings as
+  well as required keys; it must not silently override the configured scheme.
 - **`conn::s3::ConnectorManager`** — credential store + S3 object I/O (`list`/`download`/`upload`) backed by
   Arrow's `S3FileSystem`. Credentials are registered per alias at startup from the `s3:` section of the
   connection config file (via `add_credentials`); there is no remove path. Every handler reports a typed

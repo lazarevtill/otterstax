@@ -121,6 +121,32 @@ SQL clients. S3 uses a separate internal file manager and a private `s3-staging`
 directory under the tenant data directory, with the same size bound. SQL clients
 cannot use this internal manager to evade their local file permissions.
 
+## S3 transport and credentials
+
+S3 connections use HTTPS, including custom `endpoint` values. An endpoint is a
+hostname with an optional port; configure its transport separately as `scheme`.
+TLS always verifies the certificate chain and hostname. `ca_file` supplies a PEM
+trust bundle for private object stores; otherwise the TLS library's trust store
+applies. Local HTTP object-store fixtures explicitly set `scheme: http`.
+
+```yaml
+connections:
+  s3:
+    - alias: storage
+      access_key_env: OTTERSTAX_S3_ACCESS_KEY
+      secret_key_env: OTTERSTAX_S3_SECRET_KEY
+      region: us-east-1
+      endpoint: storage.example:9443
+      scheme: https
+      ca_file: /run/tls/storage-ca.crt
+```
+
+Use `session_token_env` when temporary credentials require a session token. Each
+environment reference must name a populated variable and cannot coexist with its
+inline field. The process resolves these references at startup. Authentication
+failures and TLS failures surface as operation errors; no plaintext fallback or
+certificate-verification bypass is available.
+
 `tests/test_client_security.py` exercises the actual server protocols against an
 HTTPS introspection fixture. `tests/test_keycloak_live.py` owns a separate local
 Keycloak container for live signature, audience and expiry checks. Both generate

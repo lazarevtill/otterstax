@@ -97,6 +97,7 @@ int main(int argc, char* argv[]) {
         access = otterstax::security::make_server_access(server_config.security);
         std::vector<std::filesystem::path> protected_paths{data_dir, config_path, server_config.security.private_key_file,
                                                           server_config.security.certificate_file, server_config.security.keycloak.ca_file};
+        for (const auto& s3 : server_config.connections.s3) protected_paths.emplace_back(s3.ca_file);
         files = std::make_shared<otterstax::security::file_access>(
             server_config.security.files,
             server_config.security.mode == otterstax::security::access_mode::trusted_private,

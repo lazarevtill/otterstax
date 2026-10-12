@@ -271,6 +271,8 @@ core::error_t ComponentManager::register_connections(const config::ConnectionsCo
             .session_token = std::pmr::string{std::string_view{c.session_token}, resource_},
             .endpoint = std::pmr::string{std::string_view{c.endpoint}, resource_},
             .alias = std::pmr::string{std::string_view{c.alias}, resource_},
+            .scheme = std::pmr::string{std::string_view{c.scheme}, resource_},
+            .ca_file = std::pmr::string{std::string_view{c.ca_file}, resource_},
         };
         auto [needs_sched, stored] = actor_zeta::send(s3_manager_->address(),
                                                       &conn::s3::ConnectorManager::add_credentials,

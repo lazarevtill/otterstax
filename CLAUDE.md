@@ -7,7 +7,8 @@ and [security internals](security/CLAUDE.md) for the current authorization bound
 
 Keycloak SQL file access requires configured import/export roots. File operations
 use directory descriptors and atomic exports; S3 staging is private to each tenant's
-data directory. Deployment details live in `docs/deployment.md`.
+data directory. S3 endpoints default to verified HTTPS and support environment
+credential references. Deployment details live in `docs/deployment.md`.
 
 
 Engine storage and application logs use `--data-dir`, then `OTTERSTAX_DATA_DIR`,
