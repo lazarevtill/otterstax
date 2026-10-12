@@ -7,6 +7,7 @@ set(${PROJECT_NAME}_SOURCES
     test_ch_statement.cpp
     test_connector_errors.cpp
     test_connector_manager.cpp
+    test_remote_transaction_connections.cpp
     test_data_directory_lock.cpp
     test_mysql_connector.cpp
     test_parse_port.cpp

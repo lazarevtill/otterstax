@@ -19,6 +19,7 @@
 
 #include "../api_connections/connection_config.hpp"
 #include "utility/thread_pool_manager.hpp"
+#include "utility/session.hpp"
 #include "utility/wait_barrier.hpp"
 
 #include <components/expressions/compare_expression.hpp>
@@ -58,13 +59,19 @@ namespace mysql {
         [[nodiscard]] core::result_wrapper_t<std::string>
         addConnection(conn::api_server::ConnectionParams connection_param);
 
+        // Driven only by the integration actor, after its preceding queries
+        // have drained. Each transaction owns a separate physical connection.
+        core::error_t begin_transaction(session_id session, const std::string& alias);
+        core::error_t finish_transaction(session_id session, bool commit);
+
         // Every failure — the checks below, a connector error and anything the
         // driver or handler throws on the io thread — comes back through the
         // returned future as a value. This function does not throw.
         template<typename Callable>
         requires std::invocable<Callable, const boost::mysql::results&>
             otterstax::query_future_t<std::invoke_result_t<Callable, const boost::mysql::results&>>
-            executeQuery(const std::string& uuid, std::string_view query, Callable handler) {
+            executeQuery(const std::string& uuid, std::string_view query, Callable handler,
+                         std::optional<session_id> transaction = std::nullopt) {
             OTX_ZONE_N("mysql::ConnectorManager::executeQuery");
             using result_t = std::invoke_result_t<Callable, const boost::mysql::results&>;
             // A query spawned on a pool that is not running never completes: nothing
@@ -84,26 +91,38 @@ namespace mysql {
                     std::pmr::string{("[ConnectorManager::executeQuery] Invalid connection uuid: " + uuid).c_str(),
                                      resource_}));
             }
-            if (conn->second->status() == Status::Closed) {
+            IConnector* selected = conn->second.get();
+            if (transaction) {
+                auto active = transactions_.find(*transaction);
+                if (active == transactions_.end() || active->second.alias != uuid) {
+                    return otterstax::make_failed_future<result_t>(core::error_t(
+                        core::error_code_t::invalid_parameter,
+                        std::pmr::string{"No transaction connection for this session and alias", resource_}));
+                }
+                selected = active->second.connector.get();
+            }
+            if (selected->status() == Status::Closed) {
                 log_->error("[ConnectorManager::executeQuery] Connector is not connected");
                 return otterstax::make_failed_future<result_t>(core::error_t(
                     core::error_code_t::io_error,
                     std::pmr::string{"[ConnectorManager::executeQuery] Connector is not connected", resource_}));
             }
-            if (!conn->second->isConnected()) {
+            // Health probes and reconnect can discard an aborted transaction.
+            // Transaction queries must use the original socket or fail.
+            if (!transaction && !selected->isConnected()) {
                 // A transient reconnect failure fails THIS query only and leaves the
                 // connection registered: unregistering it here would drop the uid's
                 // external database from the ENGINE catalog while other sessions'
                 // in-flight plans still reference it, and they would then die with a
                 // misleading "database does not exist".
-                if (auto err = conn->second->tryReconnect(); err.contains_error()) {
+                if (auto err = selected->tryReconnect(); err.contains_error()) {
                     return otterstax::make_failed_future<result_t>(std::move(err));
                 }
             }
             try {
                 return otterstax::spawn_marshaled<result_t>(
                     thread_pool_manager_.ctx(),
-                    otterstax::run_with_owned_handler<result_t, const boost::mysql::results&>(*conn->second,
+                    otterstax::run_with_owned_handler<result_t, const boost::mysql::results&>(*selected,
                                                                                               query,
                                                                                               std::move(handler)),
                     resource_);
@@ -125,6 +144,13 @@ namespace mysql {
         bool hasConnection(const std::string& uuid) const noexcept;
 
     private:
+        struct transaction_connection {
+            std::string alias;
+            std::unique_ptr<IConnector> connector;
+        };
+        core::error_t control(IConnector& connector, const char* command);
+        // No in-flight query may outlive an entry: the owning actor drains
+        // execute/describe before processing transaction completion.
         std::pmr::memory_resource* resource_;
         log_t log_;
         thread_pool_manager thread_pool_manager_;
@@ -134,5 +160,6 @@ namespace mysql {
         // per-connection metadata lives here — what a query needs beyond the
         // connector itself is state of that actor.
         std::unordered_map<std::string, std::unique_ptr<mysql::IConnector>> connections_;
+        std::unordered_map<session_id, transaction_connection> transactions_;
     };
 } // namespace mysql

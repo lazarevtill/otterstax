@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Connections are registered once at startup from the connection config file (see the top-level `CLAUDE.md` "Connection Config"): `ComponentManager::register_connections` calls each manager's `addConnection` / the s3 actor's `add_credentials`. There is no runtime add/remove API.
 
+MySQL and PostgreSQL connector managers also own dedicated transaction connections keyed by the full engine session ID. `begin_transaction` connects a fresh socket using the registered alias settings; it does not register another catalog entry. `executeQuery` with a transaction ID requires that session and alias to match and skips health probes and reconnect. The owning integration actor must drain its query futures before `finish_transaction` closes and removes the socket. Failed or uncertain completion is returned as an error and is never retried. The shared alias connection remains available for autocommit requests.
+
 ## Structure
 
 ```
