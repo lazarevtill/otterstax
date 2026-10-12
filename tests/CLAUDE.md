@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+`system/test_kafka_offsets.cpp` checks transactional checkpoint replacement and
+rollback. The broker suite ingests 2050 rows across batches and verifies that
+aborted producer records remain invisible to a SOURCE.
+
 `system/test_kafka_batch_loop.cpp` injects repeated batch-apply failures and
 verifies retained payloads, processing order, empty polls and shutdown.
 

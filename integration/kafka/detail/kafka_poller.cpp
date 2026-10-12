@@ -80,7 +80,17 @@ namespace otterstax::kafka::detail {
                 drive(kafka_insert_session(dispatcher_address, resource, session, database, table, std::move(chunk))),
                 "insert");
         }
-        if (!error.contains_error()) {
+        if (!error.contains_error() && !next_offsets.empty()) {
+            error = step_error(resource,
+                               drive(erase_offsets_session(dispatcher_address,
+                                                           resource,
+                                                           session,
+                                                           database,
+                                                           offsets_table,
+                                                           next_offsets)),
+                               "offsets delete");
+        }
+        if (!error.contains_error() && !next_offsets.empty()) {
             error = step_error(resource,
                                drive(write_offsets_session(dispatcher_address,
                                                            resource,

@@ -10,6 +10,7 @@ set(${PROJECT_NAME}_SOURCES
     test_mixed_plan_engine.cpp
     test_file_ingestion.cpp
     test_kafka_runtime.cpp
+    test_kafka_offsets.cpp
     test_kafka_batch_loop.cpp
     test_dml_result_shape.cpp
     test_row_producing_result_shape.cpp

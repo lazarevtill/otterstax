@@ -79,6 +79,10 @@ a `kafka_node_t` plan root → `KafkaManager::execute`; else `kafka_write_target
 
 ## Constraints / conventions
 
+- A transactional SOURCE replaces the checkpoint rows of each touched partition
+  in the same engine transaction as its data insert. Untouched partitions retain
+  their rows. A failed replacement rolls back both the deletion and the data.
+
 - Consumers use `read_committed` isolation. The SOURCE refreshes the positions
   used for reassignments after each successful engine commit; a rebalance during
   polling discards the incomplete batch from the old assignment.
