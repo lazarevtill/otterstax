@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+The Spark 3.5 client environment pins NumPy 1.26.4 and PyArrow 25.0.1 together.
+PyArrow 26 requires NumPy 2, which Spark 3.5 does not support. Each dependency
+environment runs `pip check`; every client must import before the image builds.
+
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Test Suites
