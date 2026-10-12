@@ -65,6 +65,45 @@ TEST_CASE("native SQL sessions retain engine transactions across independent req
     CHECK_FALSE(f.writer.close().has_error());
 }
 
+TEST_CASE("native SQL implicit batches commit only when their boundary ends", "[transactions]") {
+    fixture f;
+    REQUIRE_FALSE(f.writer.begin_implicit().has_error());
+    f.run(f.writer, "INSERT INTO txn.items VALUES (1);");
+    CHECK(f.rows(f.writer) == 1);
+    CHECK(f.rows(f.observer) == 0);
+    REQUIRE_FALSE(f.writer.begin_implicit().has_error());
+    f.run(f.writer, "INSERT INTO txn.items VALUES (2);");
+    CHECK(f.rows(f.observer) == 0);
+    REQUIRE_FALSE(f.writer.finish_implicit().has_error());
+    CHECK(f.writer.status() == frontend::sql_session::state::idle);
+    CHECK(f.rows(f.observer) == 2);
+}
+
+TEST_CASE("native SQL implicit batch failure rolls back before returning idle", "[transactions]") {
+    fixture f;
+    REQUIRE_FALSE(f.writer.begin_implicit().has_error());
+    f.run(f.writer, "INSERT INTO txn.items VALUES (1);");
+    auto failed = f.writer.execute(next_request_id(), "SELECT * FROM txn.missing;");
+    REQUIRE(failed.has_error());
+    f.writer.mark_failed();
+    CHECK(f.writer.status() == frontend::sql_session::state::failed);
+    REQUIRE_FALSE(f.writer.finish_implicit().has_error());
+    CHECK(f.writer.status() == frontend::sql_session::state::idle);
+    CHECK(f.rows(f.observer) == 0);
+}
+
+TEST_CASE("native SQL BEGIN promotes the whole implicit batch until explicit rollback", "[transactions]") {
+    fixture f;
+    REQUIRE_FALSE(f.writer.begin_implicit().has_error());
+    f.run(f.writer, "INSERT INTO txn.items VALUES (1);");
+    CHECK(f.run(f.writer, "BEGIN;").transaction_command == "BEGIN");
+    REQUIRE_FALSE(f.writer.finish_implicit().has_error());
+    CHECK(f.writer.status() == frontend::sql_session::state::active);
+    CHECK(f.rows(f.observer) == 0);
+    f.run(f.writer, "ROLLBACK;");
+    CHECK(f.rows(f.observer) == 0);
+}
+
 TEST_CASE("native SQL prepared statements use the transaction active at execution", "[transactions]") {
     fixture f;
     const auto prepared = next_request_id();

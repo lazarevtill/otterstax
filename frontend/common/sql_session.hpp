@@ -18,6 +18,10 @@ namespace frontend {
         result execute_prepared(session_hash_t request, const std::string& sql,
                                 std::pmr::vector<components::types::logical_value_t> parameters);
         result close();
+        // PostgreSQL extended-query batches hold a transaction until Sync.
+        // BEGIN promotes that transaction to an explicit block.
+        result begin_implicit();
+        result finish_implicit();
         void mark_failed();
         state status() const { return state_; }
         bool autocommit() const { return autocommit_; }
@@ -39,5 +43,6 @@ namespace frontend {
         bool autocommit_{true};
         bool broken_{false};
         bool closed_{false};
+        bool implicit_{false};
     };
 }

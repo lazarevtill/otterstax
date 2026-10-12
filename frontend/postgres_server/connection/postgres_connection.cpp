@@ -69,7 +69,6 @@ namespace frontend::postgres {
         , schema(std::move(schema))
         , tag(tag)
         , specified_types(std::move(specified_types))
-        , portal_names(resource)
         , described(false) {}
 
     postgres_connection::portal_meta::portal_meta(portal_t params,
@@ -244,6 +243,17 @@ namespace frontend::postgres {
         // message format", checked before the message is acted on. Only a
         // malformed StartupMessage (no session yet) and a message type the
         // protocol does not define (validate_payload_size) are FATAL.
+        // Parse/Bind/Describe can consult storage before Execute. They belong
+        // to the same implicit transaction, including errors in their payloads.
+        if (message_type == message_type::frontend::PARSE || message_type == message_type::frontend::BIND ||
+            message_type == message_type::frontend::EXECUTE || message_type == message_type::frontend::DESCRIBE) {
+            pipeline_.begin_pipeline();
+            auto started = sql_session_.begin_implicit();
+            if (started.has_error()) {
+                send_query_error(started.error());
+                return;
+            }
+        }
         switch (message_type) {
             case message_type::frontend::QUERY: {
                 // The simple protocol answers ReadyForQuery itself, after the
@@ -447,6 +457,7 @@ namespace frontend::postgres {
                     send_error_response(sql_state::PROTOCOL_VIOLATION, INVALID_MESSAGE_FORMAT);
                     return;
                 }
+                if (!finish_implicit_transaction()) return;
                 send_packet(build_ready_for_query(writer_, wire_transaction_status()));
                 break;
             }
@@ -495,7 +506,12 @@ namespace frontend::postgres {
         // ReadyForQuery reports 'E' until ROLLBACK or COMMIT ends it. Outside a
         // block there is nothing to fail and the status stays 'I'.
         sql_session_.mark_failed();
-        if (sql_session_.broken()) {
+        if (!ready_for_query_at_sync) {
+            auto ended = sql_session_.finish_implicit();
+            if (ended.has_error()) severity = error_severity::fatal();
+            if (sql_session_.status() == frontend::sql_session::state::idle) portals_.clear();
+        }
+        if (sql_session_.broken() || severity.tag == error_severity::fatal().tag) {
             send_then(build_error_response(writer_, sqlstate, std::move(message), error_severity::fatal()),
                       [this] { finish(); });
             return;

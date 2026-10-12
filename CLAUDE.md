@@ -246,8 +246,8 @@ docker compose up
 
 ## Architecture Overview
 
-All components are actor-zeta actors (`actor_mixin` for the Scheduler,
-`basic_actor` for Workers and the integration managers) communicating through
+All components are actor-zeta actors (`actor_mixin` for the Scheduler and Workers,
+`basic_actor` for the integration managers) communicating through
 typed coroutine futures. The flow for every query:
 
 ```text

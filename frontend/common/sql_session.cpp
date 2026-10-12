@@ -50,9 +50,25 @@ namespace frontend {
         }
         if (!value.has_error()) {
             state_ = next;
+            if (next == state::idle) implicit_ = false;
             value.value().transaction_command = command;
         }
         return value;
+    }
+
+    sql_session::result sql_session::begin_implicit() {
+        if (broken_ || closed_) return error(core::error_code_t::io_error, "connection session is unavailable");
+        if (state_ != state::idle) return session_payload{resource_};
+        auto value = control("BEGIN;", "BEGIN", state::active);
+        if (!value.has_error()) implicit_ = true;
+        return value;
+    }
+
+    sql_session::result sql_session::finish_implicit() {
+        if (!implicit_) return session_payload{resource_};
+        if (broken_ || closed_) return error(core::error_code_t::io_error, "connection session is unavailable");
+        const bool commit = state_ == state::active;
+        return control(commit ? "COMMIT;" : "ROLLBACK;", commit ? "COMMIT" : "ROLLBACK", state::idle);
     }
 
     std::optional<sql_session::result> sql_session::before_execute(const std::string& sql) {
@@ -111,6 +127,12 @@ namespace frontend {
             return error(core::error_code_t::transaction_finalized, "Transaction is aborted; issue ROLLBACK before continuing");
         }
         if (command == action::begin) {
+            if (implicit_) {
+                implicit_ = false;
+                session_payload value{resource_};
+                value.transaction_command = "BEGIN";
+                return value;
+            }
             if (state_ == state::active) {
                 return error(core::error_code_t::unimplemented_yet, "Nested transactions are not supported");
             }
@@ -174,6 +196,7 @@ namespace frontend {
 
     void sql_session::mark_failed() {
         if (state_ != state::active) return;
+        const bool implicit = implicit_;
         // The engine may already have aborted a failed DML. ROLLBACK is
         // idempotent and also covers parse, bind, routing and encoding errors.
         if (!broken_) {
@@ -181,6 +204,7 @@ namespace frontend {
             if (rollback.has_error()) broken_ = true;
         }
         state_ = state::failed;
+        implicit_ = implicit;
     }
 
     sql_session::result sql_session::close() {

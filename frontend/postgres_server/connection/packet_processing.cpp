@@ -109,6 +109,12 @@ namespace frontend::postgres {
 
     void postgres_connection::handle_query(std::string query) {
         OTX_ZONE_N("pg::handle_query");
+        // A simple Query replaces the unnamed statement and portal.
+        if (!do_close(describe_close_arg::STATEMENT, "")) {
+            send_error_response(sql_state::INTERNAL_ERROR, "Unable to release unnamed statement", error_severity::fatal());
+            return;
+        }
+        do_close(describe_close_arg::PORTAL, "");
         if (try_deallocate(query)) return;
         const auto id = next_request_id();
         auto r = sql_session_.execute(id, query);
@@ -144,10 +150,21 @@ namespace frontend::postgres {
             }
             response = postgres_resultset::build_packets(std::move(result));
         }
+        if (!finish_implicit_transaction()) return;
         response.emplace_back(
             build_command_complete(writer_, result_tag(sdata_result, rows_cnt)));
         response.emplace_back(build_ready_for_query(writer_, wire_transaction_status()));
         send_packet_merged(std::move(response));
+    }
+
+    bool postgres_connection::finish_implicit_transaction() {
+        auto result = sql_session_.finish_implicit();
+        if (result.has_error()) {
+            send_query_error(result.error());
+            return false;
+        }
+        if (sql_session_.status() == frontend::sql_session::state::idle) portals_.clear();
+        return true;
     }
 
     void postgres_connection::send_query_error(const core::error_t& error) {
@@ -392,7 +409,6 @@ namespace frontend::postgres {
         }
 
         // add & create portal
-        it->second.portal_names.emplace_back(portal_name);
         portals_.erase(portal_name); // portals with identical name replace each other
         portals_.emplace(std::move(portal_name), portal_meta(std::move(params), it->second, std::move(out_format)));
 
@@ -563,8 +579,9 @@ namespace frontend::postgres {
     bool postgres_connection::do_close(frontend::postgres::describe_close_arg type, std::string name) {
         if (type == describe_close_arg::STATEMENT) {
             if (auto it = statement_name_map_.find(name); it != statement_name_map_.end()) {
-                for (auto&& p : it->second.portal_names) {
-                    do_close(describe_close_arg::PORTAL, std::move(p));
+                for (auto portal = portals_.begin(); portal != portals_.end();) {
+                    if (&portal->second.statement.get() == &it->second) portal = portals_.erase(portal);
+                    else ++portal;
                 }
                 // The worker keeps an unexecuted statement until it is closed;
                 // an executed one it has already dropped (consumed).
@@ -620,6 +637,7 @@ namespace frontend::postgres {
             send_error_response(sql_state::INTERNAL_ERROR, "Unable to release prepared statement", error_severity::fatal());
             return true;
         }
+        if (!finish_implicit_transaction()) return true;
         send_packet_merged({build_command_complete(writer_, command_complete_tag::simple_command(T_DeallocateStmt)),
                             build_ready_for_query(writer_, wire_transaction_status())});
         return true;
@@ -666,6 +684,11 @@ namespace frontend::postgres {
             // than by executing anything; for one without it there are no
             // result columns and the answer is NoData.
             auto& portal = it->second;
+            if (portal.statement.get().tag != T_TransactionStmt &&
+                sql_session_.status() == frontend::sql_session::state::failed) {
+                send_error_response(sql_state::IN_FAILED_SQL_TRANSACTION, "Transaction is aborted");
+                return;
+            }
             if (portal.statement.get().tag == T_SelectStmt) {
                 if (!portal.result && !run_portal(portal)) {
                     return;

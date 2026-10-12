@@ -68,7 +68,6 @@ namespace frontend::postgres {
             // client that describes a portal and then binds it again.
             NodeTag tag;
             std::pmr::vector<field_type> specified_types;
-            std::pmr::vector<std::string> portal_names;
             // Describe(statement) already gave the client a RowDescription.
             bool described;
         };
@@ -122,11 +121,7 @@ namespace frontend::postgres {
         void handle_ssl_request(packet_reader& reader);
         void finish_authentication();
         void handle_query(std::string query);
-        // Answers a transaction statement of a simple Query from
-        // transaction_manager: one the engine ran (`error` empty: BEGIN,
-        // COMMIT, ROLLBACK) or one it refused as "Unsupported node type"
-        // (SAVEPOINT, ROLLBACK TO, RELEASE). Any other refusal goes out as the
-        // engine's error.
+        bool finish_implicit_transaction();
 
         void handle_parse(std::string stmt, std::string query, int16_t num_params, packet_reader&& reader);
         void handle_bind(std::string stmt,

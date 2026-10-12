@@ -50,7 +50,18 @@ Flight SQL and Spark Connect use independent execution contexts. SQL transaction
 commands through those paths are rejected. A native request must contain one
 SQL statement.
 
-PostgreSQL extended-protocol messages do not yet form an implicit atomic group
-up to `Sync`. Use an explicit transaction when grouping supported statements. This
-is a PostgreSQL protocol compatibility gap and a production-readiness blocker
-for clients that rely on pipeline atomicity.
+PostgreSQL extended-protocol operations form an implicit transaction through
+`Sync`. `Flush` sends pending responses without committing. `Sync` commits a
+successful implicit batch or finishes its rollback after an error. Messages
+following an error are discarded until `Sync`; its `ReadyForQuery` reports `I`.
+An explicit `BEGIN` promotes the pending implicit transaction, preserving its
+uncommitted writes. Explicit transactions survive `Sync`; a failed explicit
+block reports `E` until `ROLLBACK` or `COMMIT` ends it. A simple `Query` completes
+a pending implicit batch, committing success or rolling back failure.
+
+Portals expire when their transaction ends. Keep an explicit transaction open
+when a portal must survive multiple `Sync` messages. Named prepared statements
+last until closed or the connection ends. A simple `Query` removes the unnamed
+statement and portal. Failed transactions cannot execute or describe cached
+portal results. All implicit batches obey the same storage participant and
+capability restrictions as explicit transactions.

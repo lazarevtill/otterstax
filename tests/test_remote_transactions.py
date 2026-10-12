@@ -17,6 +17,8 @@ import pymysql
 import yaml
 
 from test_native_transactions import Client, free_port, mysql_execute, mysql_prepare
+from test_pg_transaction_batches import PgTransactionBatchTest
+from test_pg_extended_protocol import PgExtendedProtocolTest
 
 
 class Backend:
@@ -267,6 +269,18 @@ def run(server, fixture):
                 for protocol in ("postgres", "mysql"):
                     for index, backend in enumerate(backends):
                         check(protocol, ports, backend, backends[1 - index])
+                for backend in backends:
+                    PgTransactionBatchTest(ports, backend.qualified + "." + backend.table,
+                                  lambda b=backend: b.sql(f"DELETE FROM {b.table}"), backend.rows).run_all_tests()
+                observer = Client("postgres", ports)
+                try:
+                    observer.sql("CREATE TABLE local_tx.batches (id BIGINT PRIMARY KEY)")
+                    PgTransactionBatchTest(ports, "local_tx.batches",
+                                  lambda: observer.sql("DELETE FROM local_tx.batches"),
+                                  lambda: observer.sql("SELECT id FROM local_tx.batches ORDER BY id")).run_all_tests()
+                finally:
+                    observer.close()
+                PgExtendedProtocolTest(local=True, port=ports["postgres"]).run_all_tests()
             except Exception:
                 print(log_file.read_text()[-6000:], flush=True)
                 raise
