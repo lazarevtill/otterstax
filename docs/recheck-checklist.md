@@ -16,7 +16,8 @@ candidate commit and its resolved dependency graph.
 | P7: Describe fixture | `tests/test_pg_extended_protocol.py`, `tests/test_pg_transaction_batches.py` | Existing DML Describe assertions pass inside BEGIN/COMMIT; implicit portal expiry is separately asserted. | Passed on the transaction baseline. Preserve both sides of this contract. |
 | P8: fault-injection observer | `tests/test_remote_transactions.py` | Snapshot refresh on each activity poll; the intended blocked query is observed and terminated; original deadlines and rollback assertions remain intact. | Passed against the live local PostgreSQL backend. |
 | P11: MySQL fixture semantics | `tests/test_*client_*backend.py`, `tests/test_remote_transactions.py` | Independent operations explicitly autocommit; dedicated tests prove autocommit-off, isolation and rollback. | 39 backend integration groups pass with the explicit fixture settings. |
-| P9–P10: Snowflake | Feature branch configuration tests; connector, integration actor, SQL generator and live fixture still required | Reads/INSERT/UPDATE/DELETE; exact NUMBER(38), NULL, binary and timestamp values; metadata; bounds; cancellation; verified TLS; session retention; rollback; lost connection and uncertain commit; implicit-commit DDL refused in a transaction. | Configuration tests pass. Datasource execution is unfinished. No test account exists, so live acceptance is blocked. |
+| P12: scheduler fixture storage | `tests/system/test_helpers.hpp`, scheduler and concurrent scheduler tests | Unique storage per engine, unchanged persistence/assertions, teardown after actor shutdown; both conflicting cases pass together and the full suite passes. | Both conflicting cases pass 20 parallel repetitions each. The full feature tree passes 1,044/1,044 CTest cases. Fixture correction is `c09f1dc` on the reliability branch and `95f9bd6` on the feature branch. |
+| P9–P10: Snowflake | `connectors/snowflake/`, configuration/API tests and `tests/test_snowflake_transport.py`; integration actor, SQL generator and live account fixture still required | Reads/INSERT/UPDATE/DELETE; exact NUMBER(38), NULL, binary and timestamp values; metadata; bounds; cancellation; verified TLS; session retention; rollback; lost connection and uncertain commit; implicit-commit DDL refused in a transaction. | Configuration, 14 connector cases and seven HTTPS scenarios with the real ODBC driver pass. Server routing and engine conversion are unfinished. Live acceptance is blocked without an account; the HTTPS fixture only proves client behavior. |
 
 ## Verification baseline and limits
 
@@ -25,7 +26,12 @@ the same as `650afa8`. Observed results are 1,026/1,026 CTest cases, 39 backend
 integration groups, 14 native transaction groups, 60 transaction groups,
 16 existing raw PostgreSQL groups and 143 protocol security checks passing.
 These counts cover different suites and are not a single unique-test total.
-They do not validate subsequent feature changes.
+The Snowflake feature tree at `1a5fcef` additionally passes 1,044/1,044 CTest
+cases (275.93 seconds, two parallel workers), including the corrected scheduler
+fixtures and real-driver transport case. This build used the local pinned Conan
+graph; a clean image build and live Snowflake acceptance remain required.
+The transaction, security and backend integration counts above belong to the
+reliability baseline and have not been rerun on this feature candidate.
 
 The final candidate still needs the full Spark client matrix, Kafka crash
 recovery, live Keycloak and S3 HTTPS suites. The ThreadSanitizer runtime failed
@@ -42,6 +48,7 @@ with a compatible engine ABI.
 | Federated expression subqueries | Preserve remote routing through planning; prove correct rows and transaction-boundary enforcement. |
 | Kafka durability and destinations | Prove broker offset/seek retry behavior and DDL atomicity under failures; enforce destination authorization for untrusted clients. |
 | Backend security | Verified TLS and environment credential references for all relevant connectors, with rejection tests for certificate and hostname failures. |
+| Snowflake temporal fidelity | Preserve nanosecond values or return an explicit unsupported/conversion error; never silently round to the engine's microseconds. ODBC 4.0.0 reports the same timestamp type for NTZ/LTZ/TZ, so conversion also needs authoritative Snowflake type metadata. |
 | Resource limits | Bound query memory, decompression, result buffering, actor/thread count and cancellation cleanup under concurrent load. File-byte limits alone are insufficient. |
 | Spark session settings | Verify SET/UNSET changes the promised behavior or reports unsupported, rather than acknowledging an ignored setting. |
 | Error classification | Give request timeout and inactive engine transaction distinct observable outcomes. |

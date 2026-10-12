@@ -24,6 +24,7 @@ does not mean its implementation is complete or verified.
 | P9 | Snowflake datasource scope | Reads, writes and transactions | Full scope remains required. A dependency, configuration parser, mock or read-only connector does not complete it. Use a retained session and verify exact values, affected-row counts and rollback. |
 | P10 | Availability of a Snowflake test account | No account | **Live Snowflake acceptance is unverified.** Offline tests cannot establish real authentication, permissions, session retention, warehouse behavior or transaction outcomes. |
 | P11 | General MySQL fixtures rely on autocommit while their driver disables it | Set fixture autocommit explicitly | Declare autocommit in the independent-operation fixtures only. Dedicated transaction tests must continue to exercise autocommit-off, rollback and isolation. |
+| P12 | Legacy scheduler-test engines share the default WAL/catalog directory | Apply isolated storage fixture | Give every test engine its own temporary persistent storage and clean it only after engine shutdown. Keep every assertion, persistence setting and parallel execution. Recheck the two conflicting cases together and the complete suite. |
 
 The authorization to create a fork, push work and make focused commits applies
 to these branches. Commits need plain descriptions without generated footers or
@@ -43,9 +44,10 @@ upstream comments.
   Recheck token refresh/reconnect behavior and identity-provider capacity. See
   [deployment](deployment.md) for the implemented contract.
 - Snowflake implementation uses the official ODBC driver to retain a session.
-  The current feature work includes dependency packaging and configuration
-  validation; executable datasource registration and query execution are not
-  implemented yet. PAT/OAuth credentials via environment references are the
+  The feature branch includes dependency packaging, configuration validation,
+  raw ODBC transport and owned HTTPS fixture coverage with the real driver.
+  Executable datasource registration, engine conversion and query routing are
+  not implemented yet. PAT/OAuth credentials via environment references are the
   current configuration scope. Account compatibility remains unverified.
 
 No additional product approval is needed to run the listed local checks or to
