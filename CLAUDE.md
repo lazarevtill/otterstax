@@ -140,6 +140,7 @@ the VM's RAM is far smaller than the host's.
 ```bash
 # Install Conan deps
 # IMPORTANT: if conanfile.py changed, remove ./build first before re-running
+conan export cmake/conan-recipes/otterbrix
 conan install conanfile.py --build missing -s build_type=Release
 
 # Configure

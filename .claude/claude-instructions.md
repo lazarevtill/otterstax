@@ -86,6 +86,7 @@ docker compose up           # Runs app + 3 MariaDB instances
 # OR local build:
 # IMPORTANT: if conanfile.py changed, remove the existing build dir first:
 #   rm -rf ./build
+conan export cmake/conan-recipes/otterbrix
 conan install conanfile.py --build missing -s build_type=Release
 cmake -S . -B build/Release \
   -DCMAKE_TOOLCHAIN_FILE=build/Release/generators/conan_toolchain.cmake

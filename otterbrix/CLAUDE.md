@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+The engine dependency uses the local recipe in `cmake/conan-recipes/otterbrix`,
+exported before `conan install`. Its pinned revision includes positional INSERT,
+EXISTS schema planning, failed-transaction undo and initial table-checkpoint
+corrections. Keep source patches in that recipe; never modify an installed
+package under its upstream revision.
+
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Role

@@ -55,6 +55,8 @@ RUN if [ "$TSAN_DEPS" = "true" ]; then \
 # the devcontainer preset layout exactly.
 WORKDIR /app
 COPY conanfile.py tsan-deps.profile ./
+COPY cmake/conan-recipes/otterbrix ./cmake/conan-recipes/otterbrix
+RUN conan export cmake/conan-recipes/otterbrix
 COPY cmake/conan-hooks/hook_librdkafka_c11threads_off.py ./conan-hooks/
 RUN if [ "$TSAN_DEPS" = "true" ]; then \
         mkdir -p /root/.conan2/extensions/hooks && \

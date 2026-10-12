@@ -35,6 +35,8 @@ RUN rm /bin/sh && ln -s /bin/bash /bin/sh
 # devcontainer preset layout exactly.
 WORKDIR /app
 COPY conanfile.py .
+COPY cmake/conan-recipes/otterbrix ./cmake/conan-recipes/otterbrix
+RUN conan export cmake/conan-recipes/otterbrix
 RUN if [ "$WITH_TRACY" = "true" ]; then \
         conan install conanfile.py --build missing \
             -s build_type=Release \
