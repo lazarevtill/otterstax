@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+Product choices and their acceptance boundaries live in
+[docs/product-decisions.md](docs/product-decisions.md). Keep the
+[recheck checklist](docs/recheck-checklist.md) current when implementation or
+verification changes. Owner decisions, engineering assumptions and observed
+test results must remain distinguishable; a decision is not test evidence.
+
 Native transaction semantics and current protocol limits are documented in
 [docs/transactions.md](docs/transactions.md). Keep engine execution context
 separate from process-unique request/prepared-statement IDs.
