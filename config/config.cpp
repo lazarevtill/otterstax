@@ -96,6 +96,32 @@ namespace {
                 else result.keycloak.max_in_flight = value.value();
             }
         }
+        if (const auto files = node["files"]) {
+            if (!files.IsMap()) return invalid_field("service.security.files", "must be a mapping", resource);
+            for (auto [key, target] : {std::pair{"read_roots", &result.files.read_roots},
+                                      std::pair{"write_roots", &result.files.write_roots}}) {
+                const auto roots = files[key];
+                if (!roots) continue;
+                const auto field = std::string{"service.security.files."} + key;
+                if (!roots.IsSequence()) return invalid_field(field, "must be a sequence of absolute directories", resource);
+                for (const auto& root : roots) {
+                    auto text = yaml_scalar<std::string>(root, field, resource);
+                    if (text.has_error()) return text.convert_error<access_config>();
+                    const std::filesystem::path path{text.value()};
+                    if (!path.is_absolute() || text.value().find('\0') != std::string::npos ||
+                        std::any_of(path.begin(), path.end(), [](const auto& part) { return part == ".."; })) {
+                        return invalid_field(field, "must contain absolute paths without parent traversal or NUL", resource);
+                    }
+                    target->push_back(std::move(text.value()));
+                }
+            }
+            if (files["max_file_bytes"]) {
+                auto value = yaml_scalar<int64_t>(files["max_file_bytes"], "service.security.files.max_file_bytes", resource);
+                if (value.has_error()) return value.convert_error<access_config>();
+                if (value.value() <= 0) return invalid_field("service.security.files.max_file_bytes", "must be positive", resource);
+                result.files.max_file_bytes = value.value();
+            }
+        }
         if (result.certificate_file.empty() != result.private_key_file.empty()) {
             return invalid_field("service.security", "TLS requires certificate_file and private_key_file", resource);
         }

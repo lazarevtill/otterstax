@@ -73,3 +73,33 @@ TEST_CASE("Client security configuration preserves explicit TLS and provider lim
     CHECK(security.keycloak.max_response_bytes == 32768);
     CHECK(security.keycloak.max_in_flight == 4);
 }
+
+TEST_CASE("Client file policy rejects malformed roots and limits") {
+    const auto files = GENERATE("[]", "{read_roots: /tmp}", "{write_roots: [relative]}",
+                                "{read_roots: [/tmp/../etc]}", "{write_roots: [[]]}",
+                                "{max_file_bytes: 0}", "{max_file_bytes: -1}", "{max_file_bytes: many}");
+    otterstax::test::temporary_directory directory("otterstax-file-config");
+    const auto path = directory.path / "config.yaml";
+    { std::ofstream file(path); file << "service:\n  security:\n    mode: trusted_private\n    files: " << files << '\n'; }
+    config::ConfigReader reader(std::pmr::new_delete_resource());
+    CHECK(reader.load(path.string()).has_error());
+}
+
+TEST_CASE("Client file policy preserves separate roots and bounded file size") {
+    otterstax::test::temporary_directory directory("otterstax-file-config");
+    const auto path = directory.path / "config.yaml";
+    { std::ofstream file(path); file << R"(service:
+  security:
+    mode: trusted_private
+    files:
+      read_roots: [/imports, /shared/input]
+      write_roots: [/exports]
+      max_file_bytes: 4096
+)"; }
+    config::ConfigReader reader(std::pmr::new_delete_resource());
+    auto loaded = reader.load(path.string());
+    REQUIRE_FALSE(loaded.has_error());
+    CHECK(loaded.value().security.files.read_roots == std::vector<std::string>{"/imports", "/shared/input"});
+    CHECK(loaded.value().security.files.write_roots == std::vector<std::string>{"/exports"});
+    CHECK(loaded.value().security.files.max_file_bytes == 4096);
+}

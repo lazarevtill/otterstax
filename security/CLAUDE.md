@@ -23,3 +23,12 @@ See `docs/deployment.md` for configuration, authorization boundaries and client
 requirements. Claim parser/config tests live in `tests/unit/config`; real protocol
 and live-provider tests are `tests/test_client_security.py` and
 `tests/test_keycloak_live.py`.
+
+`file_access` holds POSIX directory descriptors for configured read/write roots.
+Every path component is opened with `openat`/`O_NOFOLLOW`; never replace this with
+canonical-path validation followed by a pathname open. Imports reject hard links
+and special files, then pass bounded bytes to converters. `file_output` is an
+Arrow stream over an exclusively created private file. Only `commit()` publishes
+it; destruction discards incomplete output. Keep configured directories under
+the deployment account's control. The descriptor boundary does not defend against
+an OS user who can rename entries in those directories.

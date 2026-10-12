@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "file_access_config.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -30,6 +32,7 @@ namespace otterstax::security {
         std::string certificate_file;
         std::string private_key_file;
         keycloak_config keycloak;
+        file_access_config files;
     };
 
     enum class token_status { accepted, rejected, unavailable };
