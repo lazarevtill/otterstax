@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+`test_remote_transactions.py --server PATH --backend-config PATH` creates owned
+tables on the test PostgreSQL/MySQL backends and runs a temporary OtterStax
+instance. It checks both native protocols, independent transactions, prepared
+execution, failed blocks, storage capability refusals and disconnect rollback and forced loss of a fixture backend connection
+while another client waits for the same row lock. Preserve that lock-contention
+check when changing backend scheduling.
+
 `test_native_sql_session.cpp` covers local transaction isolation, prepared plans,
 transactional schema visibility, failure rollback, MySQL autocommit and cleanup
 after a timed-out request. `test_native_transactions.py --server PATH` exercises
