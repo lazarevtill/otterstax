@@ -29,6 +29,7 @@ TEST_CASE("Snowflake config retains credential references and bounded defaults",
     REQUIRE_FALSE(result.has_error());
     const auto& c = result.value().snowflake.at(0);
     CHECK(c.database == "ANALYTICS");
+    CHECK(c.port == 443);
     CHECK(c.schema == "PUBLIC");
     CHECK(c.authenticator == "programmatic_access_token");
     CHECK(c.token_env == "OTTERSTAX_TEST_SNOWFLAKE_TOKEN");
@@ -49,7 +50,7 @@ TEST_CASE("Snowflake config refuses malformed transport credentials and bounds",
         INFO(key);
         CHECK(parse(node).has_error());
     }
-    for (const auto* key : {"connect_timeout_seconds", "query_timeout_seconds", "max_rows", "max_result_bytes", "max_cell_bytes"}) {
+    for (const auto* key : {"port", "connect_timeout_seconds", "query_timeout_seconds", "max_rows", "max_result_bytes", "max_cell_bytes"}) {
         for (const auto* value : {"0", "-1", "1.5", "18446744073709551616"}) {
             auto node = snowflake_config();
             node["snowflake"][0][key] = value;

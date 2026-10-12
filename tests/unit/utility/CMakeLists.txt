@@ -5,6 +5,7 @@ set(${PROJECT_NAME}_SOURCES
     test_actor_mailbox.cpp
     test_asio_future_bridge.cpp
     test_ch_connector.cpp
+    test_snowflake_connector.cpp
     test_ch_statement.cpp
     test_connector_errors.cpp
     test_connector_manager.cpp

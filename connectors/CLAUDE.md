@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+`snowflake/` owns the raw synchronous ODBC connector and its injectable API.
+It requires Snowflake ODBC 4.0.0, verified HTTPS and PAT/OAuth environment token
+references. Its dedicated transaction connection closes after completion;
+no transaction reconnect or write replay is performed. Results preserve exact
+text/binary payloads for a separate engine translator. Integration actors,
+catalog registration and server query routing are not wired yet. See
+[Snowflake status](../docs/snowflake.md) and the unit/real-driver transport tests.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Role

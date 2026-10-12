@@ -49,6 +49,8 @@ struct SnowflakeConnectionDesc {
     std::string alias;
     std::string driver{"libsfodbc.so"};
     std::string host;
+    uint16_t port{443};
+    std::string ca_file;
     std::string account;
     std::string username;
     std::string database;

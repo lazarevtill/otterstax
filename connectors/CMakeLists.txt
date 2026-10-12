@@ -19,6 +19,8 @@ set(CONNECTORS_HEADERS
 )
 
 set(CONNECTORS_SOURCES
+    snowflake/odbc_api.cpp
+    snowflake/connector.cpp
     mysql/connector.cpp
     mysql/manager.cpp
     postgresql/connector.cpp
@@ -33,6 +35,8 @@ add_library(connectors
 )
 
 target_link_libraries(connectors PUBLIC
+    ODBC::ODBC
+    config::config
     Threads::Threads
     OpenSSL::Crypto
     OpenSSL::SSL

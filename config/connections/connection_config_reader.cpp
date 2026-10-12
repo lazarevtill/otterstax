@@ -273,6 +273,7 @@ namespace config {
                 desc.alias = entry.str("alias");
                 desc.driver = entry.str("driver", desc.driver);
                 desc.host = entry.str("host");
+                desc.ca_file = entry.str("ca_file");
                 desc.account = entry.str("account");
                 desc.username = entry.str("username");
                 desc.database = entry.str("database");
@@ -291,7 +292,7 @@ namespace config {
                     target = static_cast<std::decay_t<decltype(target)>>(parsed);
                     return true;
                 };
-                if (!number("connect_timeout_seconds", desc.connect_timeout_seconds) ||
+                if (!number("port", desc.port) || !number("connect_timeout_seconds", desc.connect_timeout_seconds) ||
                     !number("query_timeout_seconds", desc.query_timeout_seconds) ||
                     !number("max_rows", desc.max_rows) || !number("max_result_bytes", desc.max_result_bytes) ||
                     !number("max_cell_bytes", desc.max_cell_bytes))
@@ -378,10 +379,10 @@ namespace config {
             return "token_env must name an environment variable";
         if (!std::all_of(c.host.begin(), c.host.end(), [](unsigned char ch) { return std::isalnum(ch) || ch == '.' || ch == '-'; }))
             return "host must be a DNS hostname without a scheme, port or path";
-        for (const auto* value : {&c.driver, &c.account, &c.username, &c.database, &c.schema, &c.warehouse, &c.role, &c.table})
+        for (const auto* value : {&c.driver, &c.ca_file, &c.account, &c.username, &c.database, &c.schema, &c.warehouse, &c.role, &c.table})
             if (std::any_of(value->begin(), value->end(), [](unsigned char ch) { return ch < 32 || ch == 127; }))
                 return "connection fields must not contain control characters";
-        if (c.connect_timeout_seconds == 0 || c.query_timeout_seconds == 0 || c.max_rows == 0 ||
+        if (c.port == 0 || c.connect_timeout_seconds == 0 || c.query_timeout_seconds == 0 || c.max_rows == 0 ||
             c.max_result_bytes == 0 || c.max_cell_bytes == 0 || c.max_cell_bytes > c.max_result_bytes)
             return "limits must be positive and max_cell_bytes must not exceed max_result_bytes";
         return std::nullopt;
