@@ -135,8 +135,27 @@ namespace mysql {
             return core::error_t{core::error_code_t::do_not_exists,
                 std::pmr::string{"Unknown transaction connection alias", resource_}};
         }
+        return open_transaction(session, alias, base->second->params());
+    }
+
+    core::result_wrapper_t<std::unique_ptr<ConnectorManager>>
+    ConnectorManager::fork_transaction(session_id session, const std::string& alias) {
+        auto base = connections_.find(alias);
+        if (base == connections_.end()) {
+            return core::error_t{core::error_code_t::do_not_exists,
+                std::pmr::string{"Unknown transaction connection alias", resource_}};
+        }
+        auto child = std::make_unique<ConnectorManager>(resource_, actor_zeta::address_t::empty_address(), make_connector_, 1);
+        child->start();
+        if (auto error = child->open_transaction(session, alias, base->second->params()); error.contains_error()) {
+            return error;
+        }
+        return child;
+    }
+
+    core::error_t ConnectorManager::open_transaction(session_id session, const std::string& alias, bm::connect_params params) {
         try {
-            auto connector = make_connector_(resource_, thread_pool_manager_.ctx(), base->second->params(), alias);
+            auto connector = make_connector_(resource_, thread_pool_manager_.ctx(), std::move(params), alias);
             if (auto err = connector->connect(); err.contains_error()) return err;
             if (auto err = control(*connector, "START TRANSACTION"); err.contains_error()) {
                 connector->close();
@@ -166,5 +185,11 @@ namespace mysql {
 
     size_t ConnectorManager::totalConnections() const noexcept { return connections_.size(); }
 
-    bool ConnectorManager::hasConnection(const std::string& uuid) const noexcept { return connections_.contains(uuid); }
+    bool ConnectorManager::hasConnection(const std::string& uuid) const noexcept {
+        if (connections_.contains(uuid)) return true;
+        for (const auto& [session, transaction] : transactions_) {
+            if (transaction.alias == uuid) return true;
+        }
+        return false;
+    }
 } // namespace mysql

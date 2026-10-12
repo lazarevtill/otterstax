@@ -60,6 +60,7 @@ namespace pg {
         // have drained. Each transaction owns a separate physical connection.
         core::error_t begin_transaction(session_id session, const std::string& alias);
         core::error_t finish_transaction(session_id session, bool commit);
+        core::result_wrapper_t<std::unique_ptr<ConnectorManager>> fork_transaction(session_id session, const std::string& alias);
 
         // Every failure — the checks below, a connector error and anything the
         // driver or handler throws on the io thread — comes back through the
@@ -80,15 +81,7 @@ namespace pg {
                     std::pmr::string{"[PgConnectorManager::executeQuery] Connector thread pool is not running",
                                      resource_}));
             }
-            auto conn = connections_.find(uuid);
-            if (conn == connections_.end()) {
-                log_->error("[PgConnectorManager::executeQuery] Invalid connection uuid: {}", uuid);
-                return otterstax::make_failed_future<result_t>(core::error_t(
-                    core::error_code_t::do_not_exists,
-                    std::pmr::string{("[PgConnectorManager::executeQuery] Invalid connection uuid: " + uuid).c_str(),
-                                     resource_}));
-            }
-            IConnector* selected = conn->second.get();
+            IConnector* selected = nullptr;
             if (transaction) {
                 auto active = transactions_.find(*transaction);
                 if (active == transactions_.end() || active->second.alias != uuid) {
@@ -97,6 +90,14 @@ namespace pg {
                         std::pmr::string{"No transaction connection for this session and alias", resource_}));
                 }
                 selected = active->second.connector.get();
+            } else {
+                auto conn = connections_.find(uuid);
+                if (conn == connections_.end()) {
+                    return otterstax::make_failed_future<result_t>(core::error_t(
+                        core::error_code_t::do_not_exists,
+                        std::pmr::string{"Invalid connection uuid: " + uuid, resource_}));
+                }
+                selected = conn->second.get();
             }
             if (selected->status() == Status::Closed) {
                 log_->error("[PgConnectorManager::executeQuery] Connector is not connected");
@@ -145,6 +146,7 @@ namespace pg {
             std::unique_ptr<IConnector> connector;
         };
         core::error_t control(IConnector& connector, const char* command);
+        core::error_t open_transaction(session_id session, const std::string& alias, connect_params params);
         // No in-flight query may outlive an entry: the owning actor drains
         // execute/describe before processing transaction completion.
         std::pmr::memory_resource* resource_;
