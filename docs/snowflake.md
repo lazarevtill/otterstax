@@ -43,3 +43,10 @@ row/cell/result limits. Result-byte accounting includes value bytes and row and
 column structures; it is not a process-memory quota or a bound on the driver's
 prefetch allocations. Engine type conversion and server routing are not yet
 implemented.
+
+`tests/test_snowflake_transport.py` starts an owned HTTPS endpoint and runs
+`snowflake_transport_probe` against it using the real driver. Its certificates
+and fixture tokens are temporary. On Linux this runs as the
+`snowflake_odbc_transport` CTest case. The API fault-injection cases in
+`test_snowflake_connector.cpp` check handle cleanup, result limits and connection
+lifetime. Neither suite substitutes for a live Snowflake acceptance run.

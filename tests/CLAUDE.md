@@ -5,6 +5,14 @@ for each engine's catalog, WAL and logs. Keep the fixture alive until all actors
 and copied engine handles have been destroyed. Persistence remains enabled;
 parallel tests must never share the engine's default working-directory storage.
 
+Snowflake connector checks are split between the `[snowflake][connector]` API
+fault-injection cases and `snowflake_odbc_transport` on Linux. The latter starts
+an owned HTTPS fixture through `test_snowflake_transport.py` and calls the raw
+C++ connector in `snowflake_transport_probe` with the bundled ODBC driver. It
+checks TLS rejection, exact payloads, deadlines and lost-COMMIT behavior. It
+requires Python, OpenSSL and the pinned driver and fails if they are unavailable.
+These checks do not establish live Snowflake account or warehouse compatibility.
+
 `test_remote_transactions.py --server PATH --backend-config PATH` creates owned
 tables on the test PostgreSQL/MySQL backends and runs a temporary OtterStax
 instance. It checks both native protocols, independent transactions, prepared
