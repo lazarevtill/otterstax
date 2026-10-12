@@ -1,0 +1,362 @@
+diff --git a/.github/workflows/sync-to-gitea.yml b/.github/workflows/sync-to-gitea.yml
+--- a/.github/workflows/sync-to-gitea.yml
++++ b/.github/workflows/sync-to-gitea.yml
+@@ -27,7 +27,7 @@
+         description: 'Number of a merged PR to copy (e.g. one merged before this workflow existed)'
+         required: true
+       force:
+-        description: 'Overwrite github/pr-<N> on Gitea if it already exists'
++        description: 'Replace github/pr-<N> only if its observed commit is unchanged'
+         type: boolean
+         default: false
+ 
+@@ -62,94 +62,5 @@
+           GITEA_REPO: ${{ vars.GITEA_REPO || 'otterstax/otterstax' }}
+           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+         run: |
+-          set -euo pipefail
+-          : "${GITEA_URL:?set the GITEA_URL repository variable}"
+-          : "${GITEA_TOKEN:?set the GITEA_TOKEN secret of the gitea-sync environment}"
+-          GITEA_URL=${GITEA_URL%/}
+-          GITEA_GIT="$GITEA_URL/$GITEA_REPO.git"
+-          # git over HTTPS: the token as the basic-auth user name
+-          AUTH=$(printf '%s:x-oauth-basic' "$GITEA_TOKEN" | base64 -w0)
+-          echo "::add-mask::$AUTH"
+-          gitea_git() { git -c http.extraHeader="Authorization: Basic $AUTH" "$@"; }
+-
+-          # The PRs to copy: the one asked for, or every merged PR whose commits this push brought in.
+-          if [ "$EVENT" = workflow_dispatch ]; then
+-            [[ "$INPUT_PR" =~ ^[0-9]+$ ]] || { echo "::error::pr must be a PR number, got '$INPUT_PR'"; exit 1; }
+-            prs=$INPUT_PR
+-          else
+-            if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+-              commits=$AFTER
+-            else
+-              commits=$(git rev-list --reverse "$BEFORE..$AFTER")
+-            fi
+-            prs=$(for c in $commits; do
+-                    gh api "repos/$REPO/commits/$c/pulls" \
+-                      --jq '.[] | select(.merged_at != null and .base.ref == "main") | .number'
+-                  done | awk '!seen[$0]++')
+-          fi
+-          if [ -z "$prs" ]; then
+-            echo "No merged PR in this push, nothing to copy."
+-            exit 0
+-          fi
+-
+-          tmp=$(mktemp -d)
+-          failed=0
+-          for n in $prs; do
+-            pr=$(gh api "repos/$REPO/pulls/$n")
+-            if [ "$(jq -r .merged_at <<<"$pr")" = null ] || [ "$(jq -r .base.ref <<<"$pr")" != main ]; then
+-              echo "::warning::#$n is not merged into main, skipped"
+-              continue
+-            fi
+-            if jq -e --arg label "$SKIP_LABEL" 'any(.labels[]; (.name | ascii_downcase) == ($label | ascii_downcase))' <<<"$pr" >/dev/null; then
+-              echo "#$n: labelled '$SKIP_LABEL', not copied"
+-              continue
+-            fi
+-            branch="github/pr-$n"
+-            # A branch already there may carry a manual rebase: never overwrite it unless asked.
+-            existing=$(gitea_git ls-remote --heads "$GITEA_GIT" "refs/heads/$branch")
+-            if [ -n "$existing" ] && [ "$INPUT_FORCE" != true ]; then
+-              echo "#$n: $branch is already on Gitea, skipped (run manually with force to overwrite)"
+-              continue
+-            fi
+-
+-            # The PR's original commits: base..head, where base is where it left main.
+-            git fetch --quiet --no-tags origin "+refs/pull/$n/head:refs/remotes/pr/$n"
+-            head=$(git rev-parse "refs/remotes/pr/$n")
+-            base=$(git merge-base "$head" "$(jq -r .merge_commit_sha <<<"$pr")^1")
+-            count=$(git rev-list --count "$base..$head")
+-            if [ "$INPUT_FORCE" = true ]; then
+-              gitea_git push --force "$GITEA_GIT" "$head:refs/heads/$branch"
+-            else
+-              gitea_git push "$GITEA_GIT" "$head:refs/heads/$branch"
+-            fi
+-
+-            title=$(jq -r .title <<<"$pr")
+-            {
+-              printf 'Copied from GitHub [%s#%s](%s) by @%s, merged %s: the original %s commit(s) of `%s`, unchanged.\n\n' \
+-                "$REPO" "$n" "$(jq -r .html_url <<<"$pr")" "$(jq -r .user.login <<<"$pr")" \
+-                "$(jq -r .merged_at <<<"$pr")" "$count" "$(jq -r .head.ref <<<"$pr")"
+-              printf '**Not rebased yet.** The branch still sits on GitHub'"'"'s history, so the diff here is much larger than the PR. '
+-              printf 'Rebase it onto main, then drop `WIP:` from the title:\n\n'
+-              printf '```sh\ngit fetch origin\ngit switch -C %s origin/%s\ngit rebase --onto origin/main %s\ngit push --force-with-lease origin %s\n```\n' \
+-                "$branch" "$branch" "$base" "$branch"
+-              printf '\n(`%s` is the commit the PR started from on GitHub.)\n' "${base:0:10}"
+-              description=$(jq -r '.body // ""' <<<"$pr")
+-              if [ -n "$description" ]; then
+-                printf '\n---\n\n%s\n' "$description"
+-              fi
+-            } > "$tmp/body.md"
+-            jq -n --arg head "$branch" --arg title "WIP: [gh#$n] $title" --rawfile body "$tmp/body.md" \
+-              '{head: $head, base: "main", title: $title, body: $body}' > "$tmp/payload.json"
+-            code=$(curl -sS -o "$tmp/response.json" -w '%{http_code}' -X POST \
+-                     -H "Authorization: token $GITEA_TOKEN" -H 'Content-Type: application/json' \
+-                     --data @"$tmp/payload.json" "$GITEA_URL/api/v1/repos/$GITEA_REPO/pulls")
+-            case "$code" in
+-              201) url=$(jq -r .html_url "$tmp/response.json")
+-                   echo "#$n: $count commit(s) -> $url"
+-                   echo "- #$n $title → $url" >> "$GITHUB_STEP_SUMMARY" ;;
+-              409) echo "#$n: a Gitea PR from $branch is already open; the branch was updated" ;;
+-              *)   echo "::error::#$n: branch pushed, but the Gitea PR was not created (HTTP $code): $(head -c 500 "$tmp/response.json")"
+-                   failed=1 ;;
+-            esac
+-          done
+-          exit "$failed"
++          python3 -m unittest discover -s .github/scripts -p test_sync_to_gitea.py
++          python3 .github/scripts/sync_to_gitea.py
+diff --git a/.github/scripts/sync_to_gitea.py b/.github/scripts/sync_to_gitea.py
+new file mode 100644
+--- /dev/null
++++ b/.github/scripts/sync_to_gitea.py
+@@ -0,0 +1,156 @@
++"""Reconcile GitHub PR copies. Invoked only by the authorized sync workflow."""
++import base64
++import json
++import os
++import re
++import subprocess
++import sys
++import urllib.error
++import urllib.parse
++import urllib.request
++
++
++class Sync:
++    def __init__(self, environment):
++        self.env = dict(environment)
++        self.url = self.env["GITEA_URL"].rstrip("/")
++        parsed = urllib.parse.urlsplit(self.url)
++        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
++            raise ValueError("GITEA_URL must be an HTTPS server URL")
++        self.repository = self.env["GITEA_REPO"]
++        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.repository):
++            raise ValueError("GITEA_REPO must identify owner/repository")
++        self.remote = f"{self.url}/{self.repository}.git"
++
++    def command(self, *args, gitea=False):
++        environment = dict(self.env)
++        if gitea:
++            auth = base64.b64encode((environment["GITEA_TOKEN"] + ":x-oauth-basic").encode()).decode()
++            environment.update(GIT_CONFIG_COUNT="2", GIT_CONFIG_KEY_0="http.extraHeader",
++                               GIT_CONFIG_VALUE_0="Authorization: Basic " + auth,
++                               GIT_CONFIG_KEY_1="http.followRedirects", GIT_CONFIG_VALUE_1="false")
++        # Credentials are only in the environment; no token is an argv value.
++        completed = subprocess.run(args, env=environment, text=True, capture_output=True)
++        if completed.returncode:
++            raise RuntimeError(f"{args[0]} command failed (exit {completed.returncode})")
++        return completed.stdout.strip()
++
++    def github(self, path):
++        if path.startswith("commits/"):
++            pages = json.loads(self.command("gh", "api", "--paginate", "--slurp",
++                                             "repos/" + self.env["REPO"] + "/" + path + "?per_page=100"))
++            return [pull for page in pages for pull in page]
++        return json.loads(self.command("gh", "api", "repos/" + self.env["REPO"] + "/" + path))
++
++    def gitea(self, method, path, body=None):
++        request = urllib.request.Request(
++            f"{self.url}/api/v1/repos/{self.repository}/{path}", method=method,
++            data=None if body is None else json.dumps(body).encode(),
++            headers={"Authorization": "token " + self.env["GITEA_TOKEN"], "Content-Type": "application/json"})
++        # Redirects must not forward an Authorization header to another origin.
++        class NoRedirect(urllib.request.HTTPRedirectHandler):
++            def redirect_request(self, *args, **kwargs):
++                return None
++        opener = urllib.request.build_opener(NoRedirect)
++        with opener.open(request, timeout=30) as response:
++            return json.load(response)
++
++    def existing_pull(self, branch):
++        page = 1
++        while True:
++            pulls = self.gitea("GET", f"pulls?state=all&limit=50&page={page}")
++            if not isinstance(pulls, list):
++                raise ValueError("Unexpected Gitea pull request listing")
++            for pull in pulls:
++                if pull["head"]["ref"] == branch and pull["base"]["ref"] == "main":
++                    return pull
++            if len(pulls) < 50:
++                return None
++            page += 1
++
++    def numbers(self):
++        if self.env["EVENT"] == "workflow_dispatch":
++            value = self.env["INPUT_PR"]
++            if not re.fullmatch(r"[1-9][0-9]*", value):
++                raise ValueError("pr must be a positive PR number")
++            return [int(value)]
++        before, after = self.env["BEFORE"], self.env["AFTER"]
++        if not re.fullmatch(r"[0-9a-fA-F]{40}", before) or not re.fullmatch(r"[0-9a-fA-F]{40}", after):
++            raise ValueError("Invalid push commit identity")
++        commits = [after] if set(before) == {"0"} else self.command("git", "rev-list", "--reverse", f"{before}..{after}").splitlines()
++        numbers = []
++        for commit in commits:
++            # Any failed lookup aborts selection. It cannot silently produce a
++            # smaller successful batch from only the later commits.
++            for pull in self.github(f"commits/{commit}/pulls"):
++                if pull.get("merged_at") and pull["base"]["ref"] == "main" and pull["number"] not in numbers:
++                    numbers.append(pull["number"])
++        return numbers
++
++    def copy_one(self, number):
++        pull = self.github(f"pulls/{number}")
++        if not pull.get("merged_at") or pull["base"]["ref"] != "main":
++            return "not merged into main"
++        label = self.env["SKIP_LABEL"].casefold()
++        if any(item["name"].casefold() == label for item in pull["labels"]):
++            return "excluded by label"
++        branch = f"github/pr-{number}"
++        ref = "refs/heads/" + branch
++        remote_ref = self.command("git", "ls-remote", "--heads", self.remote, ref, gitea=True)
++        observed = ""
++        if remote_ref:
++            fields = remote_ref.split()
++            if len(fields) != 2 or fields[1] != ref or not re.fullmatch(r"[0-9a-f]{40}", fields[0]):
++                raise ValueError("Unexpected remote branch identity")
++            observed = fields[0]
++        previous_pull = self.existing_pull(branch)
++        force = self.env.get("INPUT_FORCE") == "true"
++        if previous_pull and not force:
++            return "existing pull request preserved"
++
++        head = pull["head"]["sha"]
++        merge = pull["merge_commit_sha"]
++        if not re.fullmatch(r"[0-9a-f]{40}", head) or not re.fullmatch(r"[0-9a-f]{40}", merge):
++            raise ValueError("Invalid GitHub commit identity")
++        self.command("git", "fetch", "--quiet", "--no-tags", "origin", head)
++        base = self.command("git", "merge-base", head, merge + "^1")
++        if not observed or force:
++            # An absent branch is also leased: a concurrent creator must not be
++            # overwritten. A force request leases the OID observed above.
++            self.command("git", "push", f"--force-with-lease={ref}:{observed}", self.remote,
++                         f"{head}:{ref}", gitea=True)
++        if previous_pull:
++            return "branch reconciled; existing pull request preserved"
++        disposition = "The existing branch was preserved; inspect its current history before rebasing." if observed and not force else (
++            "The branch contains the original GitHub head; rebase it onto the destination main before merging.")
++        body = (f"Copied from [{self.env['REPO']}#{number}]({pull['html_url']}).\n\n"
++                f"{disposition}\n\nOriginal GitHub base: `{base}`.\n\n" + (pull.get("body") or ""))
++        payload = {"head": branch, "base": "main", "title": f"WIP: [gh#{number}] {pull['title']}", "body": body}
++        try:
++            self.gitea("POST", "pulls", payload)
++        except urllib.error.HTTPError as error:
++            # A concurrent successful creator is success only after observing
++            # the actual copy, never merely because the server returned 409.
++            if error.code not in (409, 422) or not self.existing_pull(branch):
++                raise
++        return "branch and pull request reconciled"
++
++    def run(self):
++        failed = False
++        for number in self.numbers():
++            try:
++                print(f"#{number}: {self.copy_one(number)}", flush=True)
++            except Exception as error:
++                # Each PR has an error boundary. Transport failures do not
++                # prevent independent PRs in the same push from being attempted.
++                print(f"#{number}: reconciliation failed ({type(error).__name__})", file=sys.stderr, flush=True)
++                failed = True
++        return int(failed)
++
++
++if __name__ == "__main__":
++    try:
++        sys.exit(Sync(os.environ).run())
++    except Exception as error:
++        print(f"PR selection failed ({type(error).__name__})", file=sys.stderr)
++        sys.exit(1)
+diff --git a/.github/scripts/test_sync_to_gitea.py b/.github/scripts/test_sync_to_gitea.py
+new file mode 100644
+--- /dev/null
++++ b/.github/scripts/test_sync_to_gitea.py
+@@ -0,0 +1,87 @@
++import unittest
++from unittest.mock import Mock
++
++from sync_to_gitea import Sync
++
++
++class ReconcileTests(unittest.TestCase):
++    def fixture(self, existing="", previous=None, force=False):
++        sync = Sync({"GITEA_URL": "https://gitea.invalid", "GITEA_REPO": "owner/repo", "REPO": "owner/repo",
++                     "SKIP_LABEL": "no copy gitea", "INPUT_FORCE": str(force).lower()})
++        sync.github = Mock(return_value={"merged_at": "2026-10-12", "base": {"ref": "main"}, "labels": [],
++                                        "head": {"sha": "a" * 40}, "merge_commit_sha": "b" * 40,
++                                        "title": "change", "html_url": "https://github.invalid/pull/1", "body": "review body"})
++        sync.existing_pull = Mock(return_value=previous)
++        sync.gitea = Mock(return_value={"number": 1})
++        sync.command = Mock(side_effect=lambda *args, **kwargs: existing if "ls-remote" in args else "c" * 40)
++        return sync
++
++    def test_retry_repairs_pr_without_pushing_existing_branch(self):
++        sync = self.fixture("d" * 40 + "\trefs/heads/github/pr-1")
++        sync.copy_one(1)
++        self.assertFalse(any("push" in call.args for call in sync.command.call_args_list))
++        self.assertEqual(sync.gitea.call_args.args[:2], ("POST", "pulls"))
++
++    def test_closed_or_merged_copy_is_not_duplicated(self):
++        for state in ("open", "closed"):
++            sync = self.fixture("d" * 40 + "\trefs/heads/github/pr-1", {"state": state})
++            sync.copy_one(1)
++            sync.gitea.assert_not_called()
++            self.assertEqual(sync.command.call_count, 1)
++
++    def test_force_uses_observed_oid_lease(self):
++        sync = self.fixture("d" * 40 + "\trefs/heads/github/pr-1", force=True)
++        sync.copy_one(1)
++        push = next(call for call in sync.command.call_args_list if "push" in call.args)
++        self.assertIn("--force-with-lease=refs/heads/github/pr-1:" + "d" * 40, push.args)
++        self.assertNotIn("--force", push.args)
++
++    def test_closed_copy_does_not_resurrect_a_deleted_branch(self):
++        sync = self.fixture(previous={"state": "closed"})
++        sync.copy_one(1)
++        sync.gitea.assert_not_called()
++        self.assertFalse(any("push" in call.args for call in sync.command.call_args_list))
++
++    def test_all_state_listing_checks_later_pages(self):
++        sync = self.fixture()
++        sync.existing_pull = Sync.existing_pull.__get__(sync)
++        unrelated = {"head": {"ref": "other"}, "base": {"ref": "main"}}
++        matching = {"head": {"ref": "github/pr-1"}, "base": {"ref": "main"}, "state": "closed"}
++        sync.gitea.side_effect = [[unrelated] * 50, [matching]]
++        self.assertEqual(sync.existing_pull("github/pr-1"), matching)
++        self.assertIn("state=all", sync.gitea.call_args.args[1])
++        self.assertIn("page=2", sync.gitea.call_args.args[1])
++
++    def test_new_branch_requires_absence_lease(self):
++        sync = self.fixture()
++        sync.copy_one(1)
++        push = next(call for call in sync.command.call_args_list if "push" in call.args)
++        self.assertIn("--force-with-lease=refs/heads/github/pr-1:", push.args)
++
++    def test_api_lookup_failure_cannot_become_absence(self):
++        sync = self.fixture()
++        sync.existing_pull.side_effect = OSError("unavailable")
++        with self.assertRaises(OSError):
++            sync.copy_one(1)
++        sync.gitea.assert_not_called()
++        self.assertFalse(any("push" in call.args for call in sync.command.call_args_list))
++
++    def test_one_transport_failure_does_not_abort_other_prs(self):
++        sync = self.fixture()
++        sync.numbers = Mock(return_value=[1, 2])
++        sync.copy_one = Mock(side_effect=[OSError("network down"), "copied"])
++        self.assertEqual(sync.run(), 1)
++        self.assertEqual([call.args[0] for call in sync.copy_one.call_args_list], [1, 2])
++
++    def test_selection_failure_cannot_hide_a_missing_commit(self):
++        sync = self.fixture()
++        sync.env.update(EVENT="push", BEFORE="a" * 40, AFTER="b" * 40)
++        sync.command = Mock(return_value="c" * 40 + "\n" + "d" * 40)
++        sync.github = Mock(side_effect=OSError("lookup unavailable"))
++        with self.assertRaises(OSError):
++            sync.numbers()
++        self.assertEqual(sync.github.call_count, 1)
++
++
++if __name__ == "__main__":
++    unittest.main()

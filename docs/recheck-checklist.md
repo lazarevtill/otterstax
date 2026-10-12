@@ -45,7 +45,7 @@ with a compatible engine ABI.
 | Resource limits | Bound query memory, decompression, result buffering, actor/thread count and cancellation cleanup under concurrent load. File-byte limits alone are insufficient. |
 | Spark session settings | Verify SET/UNSET changes the promised behavior or reports unsupported, rather than acknowledging an ignored setting. |
 | Error classification | Give request timeout and inactive engine transaction distinct observable outcomes. |
-| Issue/PR coverage | Reconcile the current upstream issue and PR inventory with local reproductions, fixes and remaining gaps. A passing local patch is not an upstream resolution. |
+| Issue/PR coverage | The [current inventory](upstream-review.md) maps the two open issues and two open PRs to local dispositions. Recheck final-candidate Kafka recovery and startup regressions; PR replication remains a review patch, not a verified remote workflow. |
 
 For each candidate, record the commit, dirty-tree status, dependency revisions,
 commands, exit codes and logs. Run targeted regressions for each fix, followed
