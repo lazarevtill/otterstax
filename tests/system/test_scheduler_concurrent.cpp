@@ -43,10 +43,10 @@
 
 namespace {
     // Worker pool, session-future bridge and pool sizing are the ones every
-    // system test shares (scheduler_stack.hpp); the default-config engine, the
+    // system test shares (scheduler_stack.hpp); the isolated engine fixture, the
     // mock MySQL connect params and the future polling come from test_helpers.hpp.
     using otterstax::test::await_session;
-    using otterstax::test::init_default_test_otterbrix;
+    using otterstax::test::isolated_test_engine;
     using otterstax::test::mock_connect_params;
     using otterstax::test::poll_until_ready;
     using otterstax::test::worker_pool_size;
@@ -165,7 +165,8 @@ TEST_CASE("scheduler handles N parallel sessions without hanging") {
     constexpr size_t N = 32;
     constexpr auto WAIT_TIMEOUT = 60000ms;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     REQUIRE(resource != nullptr);
 
@@ -260,7 +261,8 @@ TEST_CASE("slow MySQL connector does not starve other sessions") {
     constexpr size_t SESSIONS = 4;
     constexpr auto WAIT_TIMEOUT = 30000ms;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     REQUIRE(resource != nullptr);
 

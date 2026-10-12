@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+Scheduler tests using `isolated_test_engine` own a unique temporary directory
+for each engine's catalog, WAL and logs. Keep the fixture alive until all actors
+and copied engine handles have been destroyed. Persistence remains enabled;
+parallel tests must never share the engine's default working-directory storage.
+
 `test_remote_transactions.py --server PATH --backend-config PATH` creates owned
 tables on the test PostgreSQL/MySQL backends and runs a temporary OtterStax
 instance. It checks both native protocols, independent transactions, prepared
