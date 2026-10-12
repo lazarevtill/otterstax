@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+`service.security` carries the explicit `trusted_private` or `keycloak` mode,
+TLS file references and Keycloak introspection limits. Parsing retains an
+unspecified mode when configuration omits it; security policy construction rejects that
+mode. Keycloak mode requires issuer,
+client ID, secret environment-variable name and both TLS files. TLS credential
+loading and HTTPS client initialization belong to `security/`, not this parser.
+
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Role

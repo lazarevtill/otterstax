@@ -7,6 +7,7 @@
 #include <yaml-cpp/yaml.h>
 #include "utility/logger.hpp"
 #include "connections/connection_config.hpp"
+#include "security/access.hpp"
 
 #include <core/result_wrapper.hpp>
 
@@ -37,6 +38,7 @@ struct SparkConnectConfig {
 };
 
 struct ServiceConfig {
+    otterstax::security::access_config security;
     FlightSqlConfig flight_sql;
     MysqlConfig mysql;
     PostgresConfig postgres;

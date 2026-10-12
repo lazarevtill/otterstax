@@ -51,7 +51,61 @@ namespace {
         return static_cast<uint16_t>(port.value());
     }
 
+    core::result_wrapper_t<otterstax::security::access_config>
+    parse_security(const YAML::Node& node, std::pmr::memory_resource* resource) {
+        using namespace otterstax::security;
+        access_config result;
+        auto mode = yaml_scalar<std::string>(node["mode"], "service.security.mode", resource);
+        if (mode.has_error()) return mode.convert_error<access_config>();
+        if (mode.value() == "trusted_private") result.mode = access_mode::trusted_private;
+        else if (mode.value() == "keycloak") result.mode = access_mode::keycloak;
+        else return invalid_field("service.security.mode", "must be trusted_private or keycloak", resource);
 
+        const auto read_text = [&](const YAML::Node& section, const char* key, std::string_view prefix,
+                                   std::string& target) -> core::error_t {
+            if (!section[key]) return core::error_t::no_error();
+            auto value = yaml_scalar<std::string>(section[key], std::string{prefix} + key, resource);
+            if (value.has_error()) return value.error();
+            target = std::move(value.value());
+            return core::error_t::no_error();
+        };
+        for (auto [key, target] : {std::pair{"certificate_file", &result.certificate_file},
+                                   std::pair{"private_key_file", &result.private_key_file}}) {
+            auto error = read_text(node, key, "service.security.", *target);
+            if (error.contains_error()) return error;
+        }
+        if (const auto provider = node["keycloak"]) {
+            if (!provider.IsMap()) return invalid_field("service.security.keycloak", "must be a mapping", resource);
+            for (auto [key, target] : {std::pair{"issuer", &result.keycloak.issuer},
+                                       std::pair{"client_id", &result.keycloak.client_id},
+                                       std::pair{"client_secret_env", &result.keycloak.client_secret_env},
+                                       std::pair{"ca_file", &result.keycloak.ca_file}}) {
+                auto error = read_text(provider, key, "service.security.keycloak.", *target);
+                if (error.contains_error()) return error;
+            }
+            for (const auto* key : {"request_timeout_ms", "max_token_bytes", "max_response_bytes", "max_in_flight"}) {
+                if (!provider[key]) continue;
+                const auto field = std::string{"service.security.keycloak."} + key;
+                auto value = yaml_scalar<int64_t>(provider[key], field, resource);
+                if (value.has_error()) return value.convert_error<access_config>();
+                if (value.value() <= 0) return invalid_field(field, "must be positive", resource);
+                const std::string_view name{key};
+                if (name == "request_timeout_ms") result.keycloak.request_timeout = std::chrono::milliseconds{value.value()};
+                else if (name == "max_token_bytes") result.keycloak.max_token_bytes = value.value();
+                else if (name == "max_response_bytes") result.keycloak.max_response_bytes = value.value();
+                else result.keycloak.max_in_flight = value.value();
+            }
+        }
+        if (result.certificate_file.empty() != result.private_key_file.empty()) {
+            return invalid_field("service.security", "TLS requires certificate_file and private_key_file", resource);
+        }
+        if (result.mode == access_mode::keycloak &&
+            (result.certificate_file.empty() || result.keycloak.issuer.empty() || result.keycloak.client_id.empty() ||
+             result.keycloak.client_secret_env.empty())) {
+            return invalid_field("service.security", "keycloak requires TLS files, issuer, client_id and client_secret_env", resource);
+        }
+        return result;
+    }
 }
 
     ConfigReader::ConfigReader(std::pmr::memory_resource* resource)
@@ -115,10 +169,15 @@ core::result_wrapper_t<ServiceConfig> ConfigReader::load(const std::string& conf
         if (!service.IsMap()) {
             return failed(invalid_field("service", "must be a mapping", resource_));
         }
-        for (const auto* section : {"flight_sql", "mysql", "postgres", "spark_connect", "connection_retry"}) {
+        for (const auto* section : {"flight_sql", "mysql", "postgres", "spark_connect", "connection_retry", "security"}) {
             if (const auto node = service[section]; node && !node.IsMap()) {
                 return failed(invalid_field(std::string{"service."} + section, "must be a mapping", resource_));
             }
+        }
+        if (service["security"]) {
+            auto security = parse_security(service["security"], resource_);
+            if (security.has_error()) return failed(security.error());
+            server_config.security = std::move(security.value());
         }
         if (service["flight_sql"]) {
             auto flight_sql = parseFlightSqlConfig(service["flight_sql"], resource_);
