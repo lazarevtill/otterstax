@@ -38,7 +38,7 @@ namespace {
     // the mock MySQL connect params come from test_helpers.hpp. The table the
     // mock parser references ("1") is registered lazily on the first query.
     using otterstax::test::await_session;
-    using otterstax::test::init_default_test_otterbrix;
+    using otterstax::test::isolated_test_engine;
     using otterstax::test::mock_connect_params;
     using otterstax::test::worker_pool_size;
 } // namespace
@@ -46,7 +46,8 @@ namespace {
 TEST_CASE("base test case") {
     using namespace std::chrono_literals;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     // Objects built here escape into the actor graph and are freed on other
     // threads: name the global allocator rather than arena-scoping it.
     auto resource = std::pmr::new_delete_resource(); // no otterbrix processing, plain malloc/free for the mock
@@ -107,7 +108,8 @@ TEST_CASE("base test case") {
 TEST_CASE("Error in connector test case") {
     using namespace std::chrono_literals;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     assert(resource);
 
@@ -162,7 +164,8 @@ TEST_CASE("Error in connector test case") {
 TEST_CASE("Error in otterbrix test case") {
     using namespace std::chrono_literals;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     assert(resource);
 
@@ -217,7 +220,8 @@ TEST_CASE("Error in otterbrix test case") {
 TEST_CASE("Error in scheduler test case") {
     using namespace std::chrono_literals;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     assert(resource);
 
@@ -273,7 +277,8 @@ TEST_CASE("Error in scheduler test case") {
 TEST_CASE("Error in otterbrix + sql connector test case") {
     using namespace std::chrono_literals;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     assert(resource);
 
@@ -406,7 +411,8 @@ public:
 TEST_CASE("Cross-backend JOIN detection test case") {
     using namespace std::chrono_literals;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = std::pmr::new_delete_resource(); // plain malloc/free for the mock
     assert(resource);
 
@@ -497,7 +503,8 @@ TEST_CASE("Cross-backend JOIN detection test case") {
 TEST_CASE("return empty test case") {
     using namespace std::chrono_literals;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     assert(resource);
 
@@ -560,7 +567,8 @@ TEST_CASE("multi-chunk result carries all rows through the scheduler") {
 
     constexpr size_t N = 2500;
 
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     assert(resource);
 
@@ -820,7 +828,8 @@ TEST_CASE("otterbrix get_schema: sequence-rooted SELECT resolves columns") {
 }
 
 TEST_CASE("otterbrix get_schema: non-aggregate plans keep the empty-schema contract") {
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     auto otterbrix_manager = actor_zeta::spawn<db::OtterbrixManager>(
         resource,
@@ -892,7 +901,8 @@ TEST_CASE("otterbrix get_schema: non-aggregate plans keep the empty-schema contr
 }
 
 TEST_CASE("catalog get_catalog_schema: sequence-rooted SELECT rewrites the external node") {
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     catalog_schema_fixture fx(resource);
 
@@ -932,7 +942,8 @@ TEST_CASE("catalog get_catalog_schema: sequence-rooted SELECT rewrites the exter
 }
 
 TEST_CASE("catalog get_catalog_schema: non-aggregate plans keep the empty-schema contract") {
-    db::otterbrix_engine_ptr otterbrix = init_default_test_otterbrix();
+    isolated_test_engine engine_fixture;
+    auto otterbrix = engine_fixture.engine();
     auto resource = otterbrix->dispatcher()->resource();
     catalog_schema_fixture fx(resource);
     GreenplumParser parser(resource, products_aliases());
