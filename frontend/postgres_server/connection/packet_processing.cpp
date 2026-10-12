@@ -91,9 +91,9 @@ namespace frontend::postgres {
 
     void postgres_connection::handle_query(std::string query) {
         OTX_ZONE_N("pg::handle_query");
-        session_id id;
+        const auto id = next_request_id();
         // sending to the Scheduler event-loop always returns needs_sched=false
-        [[maybe_unused]] auto [needs_sched, fut] = actor_zeta::send(scheduler_, &Scheduler::execute, id.hash(), query);
+        [[maybe_unused]] auto [needs_sched, fut] = actor_zeta::send(scheduler_, &Scheduler::execute, id, query);
         auto r = otterstax::await_future_blocking<session_payload>(std::move(fut), resource_);
 
         if (r.has_error()) {
@@ -231,10 +231,10 @@ namespace frontend::postgres {
             return;
         }
 
-        session_id id;
+        const auto id = next_request_id();
         // sending to the Scheduler event-loop always returns needs_sched=false
         [[maybe_unused]] auto [needs_sched, fut] =
-            actor_zeta::send(scheduler_, &Scheduler::prepare_schema, id.hash(), query);
+            actor_zeta::send(scheduler_, &Scheduler::prepare_schema, id, query);
         auto r = otterstax::await_future_blocking<session_payload>(std::move(fut), resource_);
 
         if (r.has_error()) {
@@ -263,7 +263,7 @@ namespace frontend::postgres {
         do_close(describe_close_arg::STATEMENT, stmt);
         statement_name_map_.emplace(std::move(stmt),
                                     prepared_stmt_meta(resource_,
-                                                       id.hash(),
+                                                       id,
                                                        std::move(query),
                                                        result.parameter_count,
                                                        std::move(result.schema),
@@ -442,10 +442,10 @@ namespace frontend::postgres {
 
     bool postgres_connection::reprepare_stmt(prepared_stmt_meta& stmt) {
         OTX_ZONE_N("pg::reprepare_stmt");
-        session_id id;
+        const auto id = next_request_id();
         // sending to the Scheduler event-loop always returns needs_sched=false
         [[maybe_unused]] auto [needs_sched, fut] =
-            actor_zeta::send(scheduler_, &Scheduler::prepare_schema, id.hash(), std::string{stmt.sql.c_str()});
+            actor_zeta::send(scheduler_, &Scheduler::prepare_schema, id, std::string{stmt.sql.c_str()});
         auto r = otterstax::await_future_blocking<session_payload>(std::move(fut), resource_);
 
         if (r.has_error()) {
@@ -465,7 +465,7 @@ namespace frontend::postgres {
             return false;
         }
 
-        stmt.stmt_session = id.hash();
+        stmt.stmt_session = id;
         stmt.consumed = false;
         return true;
     }

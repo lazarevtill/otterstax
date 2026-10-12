@@ -216,11 +216,11 @@ namespace frontend::mysql {
 
     void mysql_connection::handle_query(std::string query) {
         OTX_ZONE_N("mysql::handle_query");
-        session_id id;
+        const auto id = next_request_id();
         // todo: one execute() call for simplicity - use computed schema for text_resultset columns
         // sending to the Scheduler event-loop always returns needs_sched=false
         [[maybe_unused]] auto [needs_sched, fut] =
-            actor_zeta::send(scheduler_, &Scheduler::execute, id.hash(), query);
+            actor_zeta::send(scheduler_, &Scheduler::execute, id, query);
         auto r = otterstax::await_future_blocking<session_payload>(std::move(fut), resource_);
 
         if (r.has_error()) {
@@ -317,10 +317,10 @@ namespace frontend::mysql {
 
     void mysql_connection::handle_prepared_stmt(std::string query) {
         OTX_ZONE_N("mysql::handle_prepared_stmt");
-        session_id id;
+        const auto id = next_request_id();
         // sending to the Scheduler event-loop always returns needs_sched=false
         [[maybe_unused]] auto [needs_sched, fut] =
-            actor_zeta::send(scheduler_, &Scheduler::prepare_schema, id.hash(), query);
+            actor_zeta::send(scheduler_, &Scheduler::prepare_schema, id, query);
         auto r = otterstax::await_future_blocking<session_payload>(std::move(fut), resource_);
 
         if (r.has_error()) {
@@ -344,7 +344,7 @@ namespace frontend::mysql {
         if (column_cnt) {
             if (auto bad = find_unsupported_column<frontend_type::MYSQL>(result.schema.child_types(),
                                                                         {result_encoding::BINARY})) {
-                close_stmt_on_worker(id.hash(), "COM_STMT_PREPARE refused");
+                close_stmt_on_worker(id, "COM_STMT_PREPARE refused");
                 send_error(mysql_error::ER_NOT_SUPPORTED_YET,
                            unsupported_column_message<frontend_type::MYSQL>(*bad));
                 return;
@@ -362,7 +362,7 @@ namespace frontend::mysql {
         // `query` is the text the worker accepted (a `?` statement arrives here
         // already rewritten to `$n`), so it is the text a re-prepare must use.
         statement_id_map_.emplace(next_statement_id_++,
-                                  prepared_stmt_meta(resource_, id.hash(), std::move(query), result.parameter_count));
+                                  prepared_stmt_meta(resource_, id, std::move(query), result.parameter_count));
 
         // params
         if (result.parameter_count) {
@@ -546,10 +546,10 @@ namespace frontend::mysql {
 
     bool mysql_connection::reprepare_stmt(prepared_stmt_meta& stmt) {
         OTX_ZONE_N("mysql::reprepare_stmt");
-        session_id id;
+        const auto id = next_request_id();
         // sending to the Scheduler event-loop always returns needs_sched=false
         [[maybe_unused]] auto [needs_sched, fut] =
-            actor_zeta::send(scheduler_, &Scheduler::prepare_schema, id.hash(), std::string{stmt.sql.c_str()});
+            actor_zeta::send(scheduler_, &Scheduler::prepare_schema, id, std::string{stmt.sql.c_str()});
         auto r = otterstax::await_future_blocking<session_payload>(std::move(fut), resource_);
 
         if (r.has_error()) {
@@ -569,7 +569,7 @@ namespace frontend::mysql {
             return false;
         }
 
-        stmt.stmt_session = id.hash();
+        stmt.stmt_session = id;
         stmt.consumed = false;
         return true;
     }

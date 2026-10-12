@@ -10,6 +10,7 @@ set(${PROJECT_NAME}_SOURCES
     test_mysql_connector.cpp
     test_parse_port.cpp
     test_session.cpp
+    test_request_identity.cpp
     test_wait_barrier.cpp
 )
 

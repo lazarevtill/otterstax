@@ -39,8 +39,8 @@ namespace frontend::spark {
         // is sent inside the handler's zone, which closes before the first co_await;
         // the prepare is awaited — or a request refused inside the zone answered —
         // after it.
-        session_id id;
-        const session_hash_t hash = id.hash();
+        const auto id = next_request_id();
+        const session_hash_t hash = id;
         grpc::Status refusal = grpc::Status::OK;
         Scheduler::unique_future<Scheduler::session_result> prepare_fut;
         {

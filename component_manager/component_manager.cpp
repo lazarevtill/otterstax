@@ -262,7 +262,7 @@ core::error_t ComponentManager::register_connections(const config::ConnectionsCo
         };
         auto [needs_sched, stored] = actor_zeta::send(s3_manager_->address(),
                                                       &conn::s3::ConnectorManager::add_credentials,
-                                                      session_id().hash(),
+                                                      next_request_id(),
                                                       std::move(params));
         // The s3 actor runs its handler to completion on the sending thread, so
         // the future is settled once send() returns; anything else means the

@@ -97,9 +97,9 @@ TEST_CASE("base test case") {
                                                   actor_zeta::address_t::empty_address());
     assert(scheduler);
     std::string sql = "SELECT 1 AS test";
-    session_id id; // Use session_id type for consistency
+    const auto id = next_request_id(); // Use session_id type for consistency
     std::cout << "[Main thread] " << std::this_thread::get_id() << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id.hash(), sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
     auto r = await_session(std::move(fut), 5000ms, resource);
     std::cout << "[Main thread] " << std::this_thread::get_id() << " check data" << std::endl;
     REQUIRE(!r.has_error());

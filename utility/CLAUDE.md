@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+Use `next_request_id()` for process-local request and prepared-statement handles.
+An engine session hash is not a unique identifier; keep the complete engine
+session value when identity must persist across statements.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Role

@@ -146,8 +146,8 @@ namespace frontend::spark {
         const auto& plan = request.plan();
 
         // OtterStax session id — its hash keys Scheduler worker routing.
-        session_id id;
-        const session_hash_t hash = id.hash();
+        const auto id = next_request_id();
+        const session_hash_t hash = id;
 
         // The synchronous part of the dispatch — the pre-flight check, the choice of
         // answer, the translation of a DataFrame plan and the first request to the
