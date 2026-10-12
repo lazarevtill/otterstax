@@ -347,8 +347,7 @@ Worker::Worker(std::pmr::memory_resource* res,
                actor_zeta::address_t s3_manager,
                actor_zeta::address_t file_manager,
                actor_zeta::address_t kafka_manager)
-    : actor_zeta::basic_actor<Worker>(res)
-    , resource_(res)
+    : resource_(res)
     , self_index_(self_index)
     , worker_count_(worker_count)
     , log_(get_logger(logger_tag::SCHEDULER))
@@ -393,9 +392,8 @@ actor_zeta::behavior_t Worker::behavior(actor_zeta::mailbox::message* msg) {
 // the only call that may throw (IParser::parse) is fenced inside parse_sql.
 //
 // Tracy zones are per-thread and strictly nested, and a Worker coroutine resumes
-// after co_await on whichever sharing_scheduler thread picks the actor up. A
-// zone spanning a suspension point would therefore end on another thread (or
-// out of order) and corrupt the trace, so each handler opens its zone in a block
+// after co_await on its own thread, interleaved with other handlers. A
+// zone spanning a suspension point would therefore end out of order and corrupt the trace, so each handler opens its zone in a block
 // that closes before the first co_await: the zone measures the handler's own
 // synchronous work, the awaited actors measure theirs.
 

@@ -16,7 +16,6 @@
 #include <utility>
 
 Scheduler::Scheduler(std::pmr::memory_resource* res,
-                     actor_zeta::scheduler_raw scheduler,
                      std::size_t worker_count,
                      parser_factory_fn parser_factory,
                      const otterstax::names::alias_registry_t& aliases,
@@ -29,13 +28,11 @@ Scheduler::Scheduler(std::pmr::memory_resource* res,
                      actor_zeta::address_t file_manager,
                      actor_zeta::address_t kafka_manager)
     : resource_(res)
-    , scheduler_(scheduler)
     , log_(get_logger(logger_tag::SCHEDULER))
     , workers_(res)
     , worker_addresses_(res) {
     assert(log_.is_valid());
     assert(res != nullptr);
-    assert(scheduler_ != nullptr);
     assert(worker_count > 0);
     assert(parser_factory != nullptr);
 
@@ -64,108 +61,14 @@ Scheduler::Scheduler(std::pmr::memory_resource* res,
         workers_.push_back(std::move(worker));
     }
 
-    // Event-loop-in-thread (otterbrix dispatcher model). enqueue_impl (any sender
-    // thread) only pushes into inbox_ and wakes pump_cv_; this thread owns ALL
-    // behaviour processing. The in-flight slot list is LOCAL to the loop, so no
-    // lock guards the phase logic.
-    loop_thread_ = std::thread([this] {
-        std::pmr::list<in_flight_entry_t> in_flight(resource_);
-        while (loop_running_.load(std::memory_order_acquire)) {
-            // Drain the inbox into local slots, re-wrapping each raw pointer into a
-            // message_ptr. The behavior created below holds a raw pointer into the
-            // message, so pending_msg must outlive it.
-            actor_zeta::mailbox::message* raw = nullptr;
-            while (inbox_.pop(raw)) {
-                in_flight.emplace_back();
-                in_flight.back().pending_msg = actor_zeta::mailbox::message_ptr{raw};
-            }
-
-            bool progress = true;
-            while (progress) {
-                progress = false;
-
-                // (a) Create the behavior for the first slot that needs one. The
-                //     coroutine runs on this loop thread until its first co_await.
-                {
-                    in_flight_entry_t* slot = nullptr;
-                    for (auto& e : in_flight) {
-                        if (e.pending_msg && !e.behavior) {
-                            slot = &e;
-                            break;
-                        }
-                    }
-                    if (slot) {
-                        slot->behavior = behavior(slot->pending_msg.get());
-                        progress = true;
-                        continue;
-                    }
-                }
-
-                // (b) Resume the first behavior whose awaited future is ready.
-                {
-                    actor_zeta::detail::coroutine_handle<> cont{};
-                    for (auto& e : in_flight) {
-                        if (e.behavior.is_awaited_ready()) {
-                            cont = e.behavior.take_awaited_continuation();
-                            if (cont) {
-                                break;
-                            }
-                        }
-                    }
-                    if (cont) {
-                        cont.resume();
-                        progress = true;
-                        continue;
-                    }
-                }
-
-                // (c) Erase one finished slot, then restart the pass (erase
-                //     invalidates the iteration). behavior + pending_msg destruct
-                //     on this thread.
-                for (auto it = in_flight.begin(); it != in_flight.end(); ++it) {
-                    if (it->behavior && it->behavior.done()) {
-                        in_flight.erase(it);
-                        progress = true;
-                        break;
-                    }
-                }
-            }
-
-            // Idle sleep. The 100µs timeout re-polls is_awaited_ready() even if a
-            // worker completes cross-thread without a new inbox push, guaranteeing
-            // liveness (no lost-wakeup on this side).
-            std::unique_lock<std::mutex> lk(mutex_);
-            if (inbox_.empty()) {
-                pump_cv_.wait_for(lk, std::chrono::microseconds(100));
-            }
-        }
-        // Local in_flight destructs HERE on the loop thread: still-suspended
-        // behaviors are destroyed safely.
-    });
-
     log_->info("Scheduler initialized with {} workers", worker_count);
 }
 
-Scheduler::~Scheduler() {
-    loop_running_.store(false, std::memory_order_release);
-    pump_cv_.notify_one();
-    if (loop_thread_.joinable()) {
-        loop_thread_.join();
-    }
-    // Drain any leftover inbox_ raw pointers so their PMR memory is freed.
-    actor_zeta::mailbox::message* raw = nullptr;
-    while (inbox_.pop(raw)) {
-        actor_zeta::mailbox::message_ptr drop{raw};
-    }
-}
+Scheduler::~Scheduler() = default;
 
 std::pair<bool, actor_zeta::detail::enqueue_result>
 Scheduler::enqueue_impl(actor_zeta::mailbox::message_ptr msg) {
-    // Delivery only — ALL processing happens on loop_thread_. The lock-free inbox
-    // takes ownership of the raw message* (release()); the loop re-wraps it.
-    inbox_.push(msg.release());
-    pump_cv_.notify_one();
-    return {false, actor_zeta::detail::enqueue_result::success};
+    return mailbox_.enqueue(std::move(msg));
 }
 
 actor_zeta::behavior_t Scheduler::behavior(actor_zeta::mailbox::message* msg) {
@@ -197,19 +100,30 @@ actor_zeta::behavior_t Scheduler::behavior(actor_zeta::mailbox::message* msg) {
 
 template<typename Method, typename... Args>
 actor_zeta::unique_future<Scheduler::session_result>
-Scheduler::route(Method method, session_hash_t id, Args&&... args) {
-    const auto idx = id % workers_.size();
-    auto [needs_sched, fut] = actor_zeta::send(worker_addresses_[idx], method, id, std::forward<Args>(args)...);
-    if (needs_sched) {
-        scheduler_->enqueue(workers_[idx].get());
+Scheduler::route(Method method, session_hash_t id, Args... args) {
+    // Coroutine parameters own their values while queued behind another request.
+    auto [lane, first] = request_lanes_.try_emplace(id);
+    if (!first) {
+        lane->second.emplace_back(resource());
+        auto turn = lane->second.back().get_future();
+        co_await std::move(turn);
     }
-    return std::move(fut);
+    const auto idx = id % workers_.size();
+    auto [needs_sched, fut] = actor_zeta::send(worker_addresses_[idx], method, id, std::move(args)...);
+    auto result = co_await std::move(fut);
+    auto& waiting = request_lanes_.at(id);
+    if (waiting.empty()) request_lanes_.erase(id);
+    else {
+        waiting.front().set_value(true);
+        waiting.pop_front();
+    }
+    co_return result;
 }
 
 actor_zeta::unique_future<Scheduler::session_result> Scheduler::execute(session_hash_t id, std::string sql, execution_context context) {
     if (!start_request(context)) {
         co_return core::error_t{core::error_code_t::invalid_parameter,
-                               std::pmr::string{"connection session is closing", resource()}};
+                               std::pmr::string{"connection session is closing or already executing a request", resource()}};
     }
 
     unique_future<session_result> fut;
@@ -225,7 +139,7 @@ actor_zeta::unique_future<Scheduler::session_result> Scheduler::execute(session_
 actor_zeta::unique_future<Scheduler::session_result> Scheduler::execute_statement(session_hash_t id, execution_context context) {
     if (!start_request(context)) {
         co_return core::error_t{core::error_code_t::invalid_parameter,
-                               std::pmr::string{"connection session is closing", resource()}};
+                               std::pmr::string{"connection session is closing or already executing a request", resource()}};
     }
 
     unique_future<session_result> fut;
@@ -243,7 +157,7 @@ Scheduler::execute_prepared_statement(session_hash_t id,
                                       std::pmr::vector<components::types::logical_value_t> parameters, execution_context context) {
     if (!start_request(context)) {
         co_return core::error_t{core::error_code_t::invalid_parameter,
-                               std::pmr::string{"connection session is closing", resource()}};
+                               std::pmr::string{"connection session is closing or already executing a request", resource()}};
     }
 
     unique_future<session_result> fut;
@@ -259,7 +173,7 @@ Scheduler::execute_prepared_statement(session_hash_t id,
 actor_zeta::unique_future<Scheduler::session_result> Scheduler::prepare_schema(session_hash_t id, std::string sql, execution_context context) {
     if (!start_request(context)) {
         co_return core::error_t{core::error_code_t::invalid_parameter,
-                               std::pmr::string{"connection session is closing", resource()}};
+                               std::pmr::string{"connection session is closing or already executing a request", resource()}};
     }
 
     unique_future<session_result> fut;
@@ -304,7 +218,7 @@ actor_zeta::unique_future<Scheduler::session_result> Scheduler::prepare_plan(ses
 bool Scheduler::start_request(const execution_context& context) {
     if (!context.persistent) return true;
     auto& work = connections_[context.engine_session];
-    if (work.closing) return false;
+    if (work.closing || work.pending != 0) return false;
     ++work.pending;
     return true;
 }

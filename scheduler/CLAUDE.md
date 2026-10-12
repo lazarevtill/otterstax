@@ -12,19 +12,18 @@ is the only actor that frontends talk to directly.
 
 `Scheduler` is a thin session-affinity router. It owns:
 
-- A pool of N `Worker` actors spawned on an `actor_zeta::scheduler::sharing_scheduler`.
-  Every session keyed by `session_hash_t` always routes to `workers_[id % N]`
+- A pool of N `Worker` actors, each owning an interleaved mailbox thread.
+  Every request/prepared statement keyed by `session_hash_t` always routes to `workers_[id % N]`
   (sticky), so prepared-statement state never crosses workers.
-- An event-loop thread (`loop_thread_` + lock-free `inbox_` + `pump_cv_`)
-  modelled on otterbrix's `services::dispatcher::manager_dispatcher_t`.
-  `enqueue_impl` (called from any sender thread) only pushes into the inbox and
-  signals the CV; *all* coroutine creation, suspension, and resumption happens
-  on `loop_thread_`. This decouples asio frontend threads from query work and
-  eliminates the inline-pump yield-spin we used before.
+- An interleaved `actor_mailbox` that owns its thread. `enqueue_impl` only
+  delivers messages; all handler creation and continuation execution happens
+  on that thread. Pending handlers can service independent requests.
+- Per-request queues that preserve prepared-statement ordering across awaits.
+  Only one operation per persistent connection may execute at a time; separate
+  connections can progress on the same Worker.
 
-Every handler is a coroutine that forwards to the routed `Worker` and
-co_returns the worker's result. This is a future-of-future passthrough — no
-state is mutated in `Scheduler` between the send and the await.
+Query handlers route to a `Worker` and return its result. Scheduler also owns
+persistent connection lifetimes.
 
 ## Scheduler entry points
 
@@ -43,8 +42,8 @@ All return `unique_future<core::result_wrapper_t<session_payload>>`:
 Frontends await the returned future via `frontend/common/asio_future_bridge.hpp`
 (`async_await_future` polls `take_ready()`; the Spark Connect frontend uses its
 gRPC form, `frontend/spark_connect_server/await_future.hpp`); no result is ever
-pushed to a frontend through a condvar. The Scheduler's own `pump_cv_` is
-infrastructure: it only wakes `loop_thread_` when the inbox is non-empty.
+pushed to a frontend through a condvar. Mailbox condition variables wake only
+the actor thread; future readiness is polled there.
 
 ## Connection execution context
 
@@ -63,7 +62,7 @@ transactions before sending work to their managers.
 
 ## Worker pipeline
 
-Each `Worker` (`worker.{hpp,cpp}`) is a `basic_actor` that owns its own parser
+Each `Worker` (`worker.{hpp,cpp}`) owns an interleaved mailbox and its own parser
 instance (no shared parser between actors — codex rule 10) and a per-worker
 `metadata_map_` (`session_hash → metadata_t`). The map is unguarded because the
 sticky routing guarantees a single Worker handles all messages for a session.
@@ -147,12 +146,10 @@ A `DROP DATABASE` root that names no database is refused the same way.
 ### Tracy zones in coroutines
 
 Tracy zones are per-thread and strictly nested. A Worker coroutine resumes
-after `co_await` on whichever `sharing_scheduler` thread picks the actor up, and
-the Scheduler's loop thread interleaves its coroutines, so a zone that spans a
-suspension point ends on the wrong thread or out of order and corrupts the
+on its own thread after `co_await`. Scheduler and Worker both interleave
+handlers, so a zone spanning suspension can end out of order and corrupt the
 trace. Every handler therefore opens `OTX_ZONE_N` in a block that closes before
-its first `co_await` (the Scheduler handlers zone their synchronous `route()`
-call); synchronous helpers — `parse_sql`, `finish_schema_value`,
+its first `co_await` (the Scheduler handlers zone message routing setup); synchronous helpers — `parse_sql`, `finish_schema_value`,
 `take_payload`, `handle_external_statement` — carry their own zones as the
 first statement, and so does `Worker::close_statement`, which never suspends.
 The awaited actors measure their own work. This is the coroutine exception to

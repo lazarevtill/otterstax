@@ -276,11 +276,10 @@ logical plan inside the frontend (`frontend/spark_connect_server/plan_translator
 where parsing ends (`scheduler/CLAUDE.md`).
 
 The Scheduler is a session-affinity router over a pool of `Worker` actors
-(spawned on an `actor_zeta::scheduler::sharing_scheduler`); every session
-keyed by `session_hash_t` always lands on `workers_[id % N]`. The Scheduler's
-own thread runs an otterbrix-style event loop: `enqueue_impl` (any sender
-thread) only pushes into a lock-free inbox and signals a CV; all coroutine
-work happens on the loop thread. Frontends never block on shared state — they
+(each with an interleaved actor mailbox); every request or prepared statement
+keyed by `session_hash_t` lands on `workers_[id % N]`. Scheduler queues requests
+for the same ID in order. Scheduler and Workers each own their handler and
+continuation execution on one thread. `enqueue_impl` only delivers messages. Frontends never block on shared state — they
 hold the future returned by `Scheduler::execute` and poll it from the
 per-connection asio executor through `frontend/common/asio_future_bridge.hpp`
 (the Spark Connect handlers, which run on an `agrpc::GrpcExecutor`, through its
@@ -367,8 +366,7 @@ Rules:
   `"sql_gen::generate_query"`, `"parser::prepare_sql"`).
 - **Exception — coroutine handlers that can resume on another thread.** When a handler's
   coroutine can suspend at a `co_await` and resume on another thread, or interleave with
-  other coroutines on one thread (`Worker` on the `sharing_scheduler`, the `Scheduler`
-  event loop), open the zone as the first statement of a nested block
+  other coroutines on one thread (the Worker and Scheduler mailboxes), open the zone as the first statement of a nested block
   `{ OTX_ZONE_N("Scope::function"); ... }` that closes before the first `co_await`.
   Tracy requires a zone to end on the thread that began it, in LIFO order; a zone spanning
   a suspension point breaks both and corrupts the capture. Only `assert`s, objects that

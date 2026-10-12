@@ -17,8 +17,6 @@
 #include <chrono>
 #include <thread>
 
-constexpr size_t MAX_THROUGHPUT =
-    1000; // MAX_THROUGHPUT is the maximum number of messages an actor will process before yielding to the scheduler. Setting it to a high value (or to std::numeric_limits<size_t>::max()) means actors will yield only when they have no more messages to process, which can improve performance for actors that process many messages in bursts but can lead to starvation of other actors if one actor receives a continuous stream of messages.
 
 namespace {
     otterstax::names::alias_registry_t make_alias_registry(const config::ConnectionsConfig& connections) {
@@ -124,14 +122,9 @@ ComponentManager::ComponentManager(const configuration::config& config, const co
 
     {
         OTX_ZONE_N("ComponentManager::spawn_scheduler");
-        // Work-sharing thread pool for the Worker actors: one Worker per pool
-        // thread; queries shard onto workers by session hash (id % worker_count).
+        // Each Worker owns an event loop; queries shard by request ID.
         const std::size_t worker_count = std::max<std::size_t>(2, std::thread::hardware_concurrency());
-        az_scheduler_ = std::make_unique<actor_zeta::scheduler::sharing_scheduler>(worker_count, MAX_THROUGHPUT);
-        az_scheduler_->start();
-
         scheduler_ = actor_zeta::spawn<Scheduler>(resource_,
-                                                  az_scheduler_.get(),
                                                   worker_count,
                                                   &make_parser,
                                                   aliases_,
@@ -152,14 +145,7 @@ core::error_t ComponentManager::recover() {
     return kafka_manager_->recover();
 }
 
-ComponentManager::~ComponentManager() {
-    // Stop the worker pool BEFORE any actor is destroyed: once stop() returns no
-    // pool thread will resume a Worker, so the Scheduler (event loop + workers) can
-    // be torn down safely during member destruction (supervisor lifecycle rule).
-    if (az_scheduler_) {
-        az_scheduler_->stop();
-    }
-}
+ComponentManager::~ComponentManager() = default;
 
 std::pmr::memory_resource* ComponentManager::getResource() {
     assert(resource_);
