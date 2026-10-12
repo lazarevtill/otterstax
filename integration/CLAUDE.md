@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+Backend execution serializes fragments sharing a connection alias within each
+batch. Different aliases can execute concurrently. `test_backend_managers.cpp`
+includes a connector that rejects overlapping operations on one connection.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Role
