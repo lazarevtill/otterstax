@@ -134,10 +134,10 @@ ComponentManager::ComponentManager(const configuration::config& config, const co
         assert(scheduler_ != nullptr && "scheduler must not be null");
     }
 
-    // relaunch persisted Kafka when the full actor graph and worker pool are up
-    // doing this in the KafkaManager ctor races the half-initialised engine
-    // (the poller starts before the scheduler/executor pool)
-    kafka_manager_->recover();
+}
+
+core::error_t ComponentManager::recover() {
+    return kafka_manager_->recover();
 }
 
 ComponentManager::~ComponentManager() {

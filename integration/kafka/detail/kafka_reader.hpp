@@ -110,7 +110,8 @@ namespace otterstax::kafka::detail {
                           const std::map<int32_t, int64_t>& offsets);
 
     // Highest offset per partition from a (partition_id, committed_offset) result
-    std::map<int32_t, int64_t> parse_offsets(const components::cursor::cursor_t_ptr& cursor);
+    core::result_wrapper_t<std::map<int32_t, int64_t>>
+    parse_offsets(const components::cursor::cursor_t_ptr& cursor);
 
     // Parse + run a read-only SQL query (the caller holds only the dispatcher, no parser)
     actor_zeta::unique_future<components::cursor::cursor_t_ptr>

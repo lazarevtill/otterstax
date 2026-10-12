@@ -36,6 +36,10 @@ public:
     actor_zeta::address_t catalog_address() const;
     const otterstax::names::alias_registry_t& aliases() const noexcept { return aliases_; }
 
+    // Called after construction and before opening listeners. A failed recovery
+    // keeps startup from advertising a server with missing ingestion workers.
+    [[nodiscard]] core::error_t recover();
+
     // Register every remote backend and s3 alias described by the connection
     // config (parsed from the config file at startup) with the corresponding
     // connector managers. This is the sole entry point for registering

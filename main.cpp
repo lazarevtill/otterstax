@@ -93,6 +93,11 @@ int main(int argc, char* argv[]) {
     OTX_MESSAGE_L("startup: creating component manager");
     ComponentManager cmanager(make_create_config(DATA_DIR), server_config.connections);
 
+    if (auto recovered = cmanager.recover(); recovered.contains_error()) {
+        log->error("Cannot recover persisted Kafka objects: {}", recovered.what.c_str());
+        return 1;
+    }
+
     // Register the connections read from the config file with the connector
     // managers (opens the backend connections / stores the s3 aliases). A
     // backend that is down is skipped with a logged error; a descriptor the

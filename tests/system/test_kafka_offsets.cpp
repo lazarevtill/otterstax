@@ -17,7 +17,9 @@ namespace ty = components::types;
 
 namespace {
     std::map<int32_t, int64_t> checked_offsets(const components::cursor::cursor_t_ptr& cursor) {
-        return kd::parse_offsets(cursor);
+        auto parsed = kd::parse_offsets(cursor);
+        REQUIRE_FALSE(parsed.has_error());
+        return std::move(parsed.value());
     }
 }
 
@@ -98,4 +100,30 @@ TEST_CASE("kafka transactional offsets: failed replacement rolls back both delet
     stored = query("SELECT partition_id, committed_offset FROM kafka.s__offsets;");
     REQUIRE(stored->size() == 2);
     CHECK(checked_offsets(stored) == std::map<int32_t, int64_t>{{0, 8}, {1, 9}});
+}
+
+TEST_CASE("kafka offsets: read failures and corrupt positions cannot become an empty checkpoint") {
+    otterstax::test::temporary_directory directory("otterstax-kafka-offsets-read-errors");
+    auto engine = db::make_otterbrix_engine(make_create_config(directory.path));
+    auto* resource = engine->dispatcher()->resource();
+    const auto addr = engine->engine_dispatcher_address();
+    auto query = [&](const std::string& sql) {
+        return drive_until_ready(kd::kafka_query(addr, resource, sql));
+    };
+    REQUIRE(kd::parse_offsets({}).has_error());
+    auto missing = query("SELECT partition_id, committed_offset FROM kafka.missing__offsets;");
+    REQUIRE(missing);
+    REQUIRE(missing->is_error());
+    auto parsed = kd::parse_offsets(missing);
+    REQUIRE(parsed.has_error());
+    CHECK(parsed.error().type == missing->get_error().type);
+    REQUIRE_FALSE(query("CREATE DATABASE kafka;")->is_error());
+    REQUIRE_FALSE(query("CREATE TABLE kafka.positions (partition_id INT, committed_offset BIGINT);")->is_error());
+    auto empty = kd::parse_offsets(query("SELECT * FROM kafka.positions;"));
+    REQUIRE_FALSE(empty.has_error());
+    CHECK(empty.value().empty());
+    const auto bad_row = GENERATE("(0, -1)", "(-1, 1)", "(NULL, 1)", "(0, NULL)");
+    REQUIRE_FALSE(query(std::string{"INSERT INTO kafka.positions (partition_id, committed_offset) VALUES "} + bad_row + ";")->is_error());
+    CHECK(kd::parse_offsets(query("SELECT * FROM kafka.positions;")).has_error());
+    CHECK(kd::parse_offsets(query("SELECT partition_id FROM kafka.positions;")).has_error());
 }

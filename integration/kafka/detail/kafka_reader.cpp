@@ -500,18 +500,36 @@ namespace otterstax::kafka::detail {
             .second;
     }
 
-    std::map<int32_t, int64_t> parse_offsets(const cursor::cursor_t_ptr& cursor) {
+    core::result_wrapper_t<std::map<int32_t, int64_t>> parse_offsets(const cursor::cursor_t_ptr& cursor) {
         OTX_ZONE_N("kafka::parse_offsets");
         std::map<int32_t, int64_t> result;
-        if (!cursor || cursor->is_error()) {
-            return result;
+        if (!cursor) {
+            return core::error_t(core::error_code_t::other_error,
+                                 std::pmr::string{"kafka offsets: no reply from the engine"});
+        }
+        if (cursor->is_error()) {
+            return cursor->get_error();
         }
         // The result is a batch of <=1024-row chunks; walk each chunk's own row
         // space (a global-row lookup through the cursor is a chunk scan per cell)
         for (const auto& chunk : cursor->chunks()) {
+            const auto column_types = chunk.types();
+            if (column_types.size() != 2 || column_types[0].type() != types::logical_type::INTEGER ||
+                column_types[1].type() != types::logical_type::BIGINT) {
+                return core::error_t(core::error_code_t::invalid_parameter,
+                                     std::pmr::string{"kafka offsets: expected (INTEGER, BIGINT) columns"});
+            }
             for (std::uint64_t row = 0; row < chunk.size(); ++row) {
+                if (chunk.data[0].is_null(row) || chunk.data[1].is_null(row)) {
+                    return core::error_t(core::error_code_t::invalid_parameter,
+                                         std::pmr::string{"kafka offsets: NULL partition or offset"});
+                }
                 const int32_t partition = chunk.value(0, row).value<int32_t>();
                 const int64_t offset = chunk.value(1, row).value<int64_t>();
+                if (partition < 0 || offset < 0) {
+                    return core::error_t(core::error_code_t::invalid_parameter,
+                                         std::pmr::string{"kafka offsets: negative partition or offset"});
+                }
                 auto it = result.find(partition);
                 if (it == result.end() || offset > it->second) {
                     result[partition] = offset;

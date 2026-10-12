@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+`system/test_kafka_recovery_errors.cpp` covers invalid persisted registries,
+missing checkpoints, worker startup errors, offsets-name collisions and duplicate
+or mismatched SOURCE/STREAM DDL. Failed operations must preserve existing data.
+
+
 `system/test_kafka_offsets.cpp` checks transactional checkpoint replacement and
 rollback. The broker suite ingests 2050 rows across batches and verifies that
 aborted producer records remain invisible to a SOURCE.

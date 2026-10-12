@@ -347,10 +347,12 @@ TEST_CASE("kafka offsets: write_offsets / parse_offsets roundtrip with max-per-p
     auto addr = engine->engine_dispatcher_address();
     // Read offsets via kafka_query — the exact path the poller uses on startup
     auto read = [&] {
-        return otterstax::kafka::detail::parse_offsets(drive_until_ready(
+        auto result = otterstax::kafka::detail::parse_offsets(drive_until_ready(
             otterstax::kafka::detail::kafka_query(addr,
                                                   resource,
                                                   "SELECT partition_id, committed_offset FROM kafka.s__offsets;")));
+        REQUIRE_FALSE(result.has_error());
+        return std::move(result.value());
     };
 
     {
@@ -1225,7 +1227,9 @@ TEST_CASE("kafka offsets: parse_offsets spans a result of more than 1024 rows") 
     REQUIRE(rows->size() == 1800);
     REQUIRE(rows->chunks().size() > 1);
 
-    auto offsets = kd::parse_offsets(rows);
+    auto parsed = kd::parse_offsets(rows);
+    REQUIRE_FALSE(parsed.has_error());
+    const auto& offsets = parsed.value();
     REQUIRE(offsets.size() == 1200);
     CHECK(offsets.at(0) == 30);
     CHECK(offsets.at(599) == 30);
@@ -1637,7 +1641,7 @@ TEST_CASE("kafka recover: __sources rows past the first chunk are replayed, a mi
     };
     CHECK(produce_mismatch("last").find("unknown object") != std::string::npos);
 
-    restarted->recover();
+    REQUIRE_FALSE(restarted->recover().contains_error());
 
     // Both real sources are registered again (a produce reaches the schema guard),
     // the ghosts were skipped, and the object past row 1024 was not lost
@@ -1723,7 +1727,7 @@ TEST_CASE("kafka recover: a source's columns are read from the catalog, for an e
     CHECK(produce_error("empty_src").find("unknown object") != std::string::npos);
     CHECK(produce_error("full_src").find("unknown object") != std::string::npos);
 
-    restarted->recover();
+    REQUIRE_FALSE(restarted->recover().contains_error());
 
     // Both are registered again with a non-empty schema (a one-column batch is
     // refused by the schema guard, not by the registry lookup)
