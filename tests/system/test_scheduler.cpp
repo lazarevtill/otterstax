@@ -99,7 +99,7 @@ TEST_CASE("base test case") {
     std::string sql = "SELECT 1 AS test";
     const auto id = next_request_id(); // Use session_id type for consistency
     std::cout << "[Main thread] " << std::this_thread::get_id() << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql, execution_context{});
     auto r = await_session(std::move(fut), 5000ms, resource);
     std::cout << "[Main thread] " << std::this_thread::get_id() << " check data" << std::endl;
     REQUIRE(!r.has_error());
@@ -158,7 +158,7 @@ TEST_CASE("Error in connector test case") {
     std::string sql = "SELECT 1 AS test";
     session_hash_t id = 1;
     std::cout << "[Main thread] " << std::this_thread::get_id() << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql, execution_context{});
     auto r = await_session(std::move(fut), 5000ms, resource);
     std::cout << "[Main thread] " << std::this_thread::get_id() << "check data" << std::endl;
     REQUIRE(r.has_error());
@@ -216,7 +216,7 @@ TEST_CASE("Error in otterbrix test case") {
     std::string sql = "SELECT 1 AS test";
     session_hash_t id = 1;
     std::cout << "[Main thread] " << std::this_thread::get_id() << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql, execution_context{});
     auto r = await_session(std::move(fut), 5000ms, resource);
     std::cout << "[Main thread] " << std::this_thread::get_id() << "check data" << std::endl;
     REQUIRE(r.has_error());
@@ -275,7 +275,7 @@ TEST_CASE("Error in scheduler test case") {
     std::string sql = "SELECT 1 AS test";
     session_hash_t id = 1;
     std::cout << "[Main thread] " << std::this_thread::get_id() << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql, execution_context{});
     auto r = await_session(std::move(fut), 5000ms, resource);
     std::cout << "[Main thread] " << std::this_thread::get_id() << "check data" << std::endl;
     REQUIRE(r.has_error());
@@ -333,7 +333,7 @@ TEST_CASE("Error in otterbrix + sql connector test case") {
     std::string sql = "SELECT 1 AS test";
     session_hash_t id = 1;
     std::cout << "[Main thread] " << std::this_thread::get_id() << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql, execution_context{});
     auto r = await_session(std::move(fut), 5000ms, resource);
     std::cout << "[Main thread] " << std::this_thread::get_id() << "check data" << std::endl;
     REQUIRE(r.has_error());
@@ -489,7 +489,7 @@ TEST_CASE("Cross-backend JOIN detection test case") {
     session_hash_t id = 1;
 
     std::cout << "[Main thread] " << std::this_thread::get_id() << " sending cross-backend query" << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql, execution_context{});
 
     // Wait for completion
     auto r = await_session(std::move(fut), 10000ms, resource);
@@ -564,7 +564,7 @@ TEST_CASE("return empty test case") {
     std::string sql = "SELECT 1 AS test";
     session_hash_t id = 1;
     std::cout << "[Main thread] " << std::this_thread::get_id() << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql, execution_context{});
     auto r = await_session(std::move(fut), 5000ms, resource);
     std::cout << "[Main thread] " << std::this_thread::get_id() << " check data" << std::endl;
     REQUIRE(!r.has_error());
@@ -629,7 +629,7 @@ TEST_CASE("multi-chunk result carries all rows through the scheduler") {
     std::string sql = "SELECT 1 AS test";
     session_hash_t id = 1;
     std::cout << "[Main thread] " << std::this_thread::get_id() << std::endl;
-    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql);
+    auto [ns, fut] = actor_zeta::send(scheduler->address(), &Scheduler::execute, id, sql, execution_context{});
     auto r = await_session(std::move(fut), 5000ms, resource);
     std::cout << "[Main thread] " << std::this_thread::get_id() << " check data" << std::endl;
     REQUIRE(!r.has_error());

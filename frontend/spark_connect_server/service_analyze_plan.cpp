@@ -57,7 +57,7 @@ namespace frontend::spark {
                         prepare_fut = std::move(actor_zeta::send(scheduler_address_,
                                                                  &Scheduler::prepare_schema,
                                                                  hash,
-                                                                 sql_command_text(plan.command().sql_command()))
+                                                                 sql_command_text(plan.command().sql_command()), execution_context{})
                                                     .second);
                     } else if (plan.has_root() && is_empty_local_relation(plan.root())) {
                         // What a SQL command that is not a query answered with: no columns.
@@ -68,7 +68,7 @@ namespace frontend::spark {
                         prepare_fut = std::move(actor_zeta::send(scheduler_address_,
                                                                  &Scheduler::prepare_schema,
                                                                  hash,
-                                                                 plan.root().sql().query())
+                                                                 plan.root().sql().query(), execution_context{})
                                                     .second);
                     } else if (plan.has_root()) {
                         auto plan_result = relation_to_plan(plan, resource_, aliases_);

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "otterbrix/parser/name_resolution.hpp"
+#include "utility/execution_context.hpp"
 
 #include <otterbrix/otterbrix.hpp>
 
@@ -86,6 +87,8 @@ struct OtterbrixStatement {
     // after finalize(), including for prepared statements. The current main
     // root still lives in `node`, where backend managers can replace it.
     std::optional<components::logical_plan::execution_plan_t> transformed_plan;
+
+    execution_context context;
 
     components::logical_plan::execution_plan_t execution_plan() const {
         components::logical_plan::execution_plan_t plan(node->resource(), node, params_node);

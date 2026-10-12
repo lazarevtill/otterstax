@@ -175,7 +175,7 @@ namespace otterstax::test {
                               session_hash_t id,
                               const std::string& sql,
                               std::chrono::milliseconds timeout = std::chrono::milliseconds(10000)) {
-        auto [ns, fut] = actor_zeta::send(s.scheduler, &Scheduler::execute, id, sql);
+        auto [ns, fut] = actor_zeta::send(s.scheduler, &Scheduler::execute, id, sql, execution_context{});
         return await_session(std::move(fut), timeout, s.resource);
     }
 
@@ -199,7 +199,7 @@ namespace otterstax::test {
                           session_hash_t id,
                           const std::string& sql,
                           std::chrono::milliseconds timeout = std::chrono::milliseconds(10000)) {
-        auto [ns, fut] = actor_zeta::send(s.scheduler, &Scheduler::prepare_schema, id, sql);
+        auto [ns, fut] = actor_zeta::send(s.scheduler, &Scheduler::prepare_schema, id, sql, execution_context{});
         return await_session(std::move(fut), timeout, s.resource);
     }
 
@@ -207,7 +207,7 @@ namespace otterstax::test {
     execute_scheduler_statement(const scheduler_stack& s,
                                 session_hash_t id,
                                 std::chrono::milliseconds timeout = std::chrono::milliseconds(10000)) {
-        auto [ns, fut] = actor_zeta::send(s.scheduler, &Scheduler::execute_statement, id);
+        auto [ns, fut] = actor_zeta::send(s.scheduler, &Scheduler::execute_statement, id, execution_context{});
         return await_session(std::move(fut), timeout, s.resource);
     }
 
@@ -217,7 +217,7 @@ namespace otterstax::test {
                                std::pmr::vector<components::types::logical_value_t> parameters,
                                std::chrono::milliseconds timeout = std::chrono::milliseconds(10000)) {
         auto [ns, fut] =
-            actor_zeta::send(s.scheduler, &Scheduler::execute_prepared_statement, id, std::move(parameters));
+            actor_zeta::send(s.scheduler, &Scheduler::execute_prepared_statement, id, std::move(parameters), execution_context{});
         return await_session(std::move(fut), timeout, s.resource);
     }
 

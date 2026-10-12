@@ -1,8 +1,10 @@
 # CLAUDE.md
 
-Use `next_request_id()` for process-local request and prepared-statement handles.
-An engine session hash is not a unique identifier; keep the complete engine
-session value when identity must persist across statements.
+`next_request_id()` allocates process-unique request/prepared-statement handles
+with an atomic counter. Do not use an engine session's hash as an identity:
+different engine sessions can have equal hashes. `execution_context` separately
+carries the full engine session value and the transaction boundary through actor
+messages.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -18,7 +20,6 @@ The server holds an exclusive OS lock on `.otterstax.lock` in its data directory
 before starting loggers or the engine. Another owner of the same directory
 fails startup. Closing the owner releases the lock, including after process
 termination; the lock file stays in place to preserve one shared lock identity.
-
 
 ### `session_payload` — lives in `scheduler/session_data.hpp`, not here
 

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "../../common/frontend_connection.hpp"
+#include "frontend/common/sql_session.hpp"
 #include "../mysql_defs/capabilities.hpp"
 #include "../mysql_defs/character_set.hpp"
 #include "../mysql_defs/error.hpp"
@@ -105,6 +106,7 @@ namespace frontend::mysql {
         void handle_execute_stmt(prepared_stmt_meta& stmt,
                                  std::pmr::vector<components::types::logical_value_t> param_values);
 
+        server_status_flags_t status_flags() const;
         void send_resultset(mysql_resultset&& result);
         void send_error(mysql_error error_code, std::string message);
         // ERR 1835 (ER_MALFORMED_PACKET) followed by the close of the
@@ -119,6 +121,7 @@ namespace frontend::mysql {
         uint32_t next_statement_id_;
         uint32_t client_max_packet_size_;
         actor_zeta::address_t scheduler_;
+        frontend::sql_session sql_session_;
         connection_state state_;
         log_t log_;
     };

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "../../common/frontend_connection.hpp"
+#include "frontend/common/sql_session.hpp"
 #include "../packet/packet_reader.hpp"
 #include "../packet/packet_utils.hpp"
 #include "../packet/packet_writer.hpp"
@@ -126,7 +127,6 @@ namespace frontend::postgres {
         // COMMIT, ROLLBACK) or one it refused as "Unsupported node type"
         // (SAVEPOINT, ROLLBACK TO, RELEASE). Any other refusal goes out as the
         // engine's error.
-        void try_handle_transaction(std::string query, std::string error);
 
         void handle_parse(std::string stmt, std::string query, int16_t num_params, packet_reader&& reader);
         void handle_bind(std::string stmt,
@@ -138,7 +138,9 @@ namespace frontend::postgres {
         void handle_close(describe_close_arg type, std::string name);
         void handle_describe(describe_close_arg type, std::string name);
 
-        void do_close(describe_close_arg type, std::string name);
+        bool do_close(describe_close_arg type, std::string name);
+        bool try_deallocate(const std::string& query);
+        void send_query_error(const core::error_t& error);
         // Appends a RowDescription (with the given result format codes) for a
         // resolved schema, NoData otherwise; `described` is set to whether a
         // RowDescription went out — only then does the client know the row
@@ -165,8 +167,10 @@ namespace frontend::postgres {
         std::pmr::unordered_map<std::string, portal_meta> portals_;
         packet_writer writer_;
         actor_zeta::address_t scheduler_;
+        frontend::sql_session sql_session_;
         std::vector<uint8_t> backend_secret_key_;
-        transaction_manager transaction_man_;
+        transaction_status wire_transaction_status() const;
+        command_complete_tag result_tag(const session_payload& payload, int64_t rows) const;
         pipeline_state pipeline_;
         bool use_protocol_3_2_;
         connection_state state_{connection_state::HANDSHAKE};

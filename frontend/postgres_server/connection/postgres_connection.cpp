@@ -46,7 +46,7 @@ namespace frontend::postgres {
         , statement_name_map_(resource_)
         , portals_(resource_)
         , scheduler_(scheduler)
-        , transaction_man_()
+        , sql_session_(resource, scheduler, false)
         , pipeline_()
         , use_protocol_3_2_(false)
         , log_(get_logger(logger_tag::POSTGRES_CONNECTION)) {
@@ -265,7 +265,7 @@ namespace frontend::postgres {
 
                 if (query.empty()) {
                     send_packet_merged({build_empty_query_response(writer_),
-                                        build_ready_for_query(writer_, transaction_man_.get_transaction_status())});
+                                        build_ready_for_query(writer_, wire_transaction_status())});
                     break;
                 }
 
@@ -447,7 +447,7 @@ namespace frontend::postgres {
                     send_error_response(sql_state::PROTOCOL_VIOLATION, INVALID_MESSAGE_FORMAT);
                     return;
                 }
-                send_packet(build_ready_for_query(writer_, transaction_man_.get_transaction_status()));
+                send_packet(build_ready_for_query(writer_, wire_transaction_status()));
                 break;
             }
             case message_type::frontend::FLUSH:
@@ -481,6 +481,7 @@ namespace frontend::postgres {
 
     void postgres_connection::send_error_response(const char* sqlstate, std::string message, error_severity severity) {
         log_->warn("[Connection {}] ERROR: sqlstate={} msg='{}'", connection_id_, sqlstate, message);
+        if (sql_session_.broken()) severity = error_severity::fatal();
         const bool ready_for_query_at_sync = pipeline_.set_error();
         if (severity.tag == error_severity::fatal().tag) {
             // FATAL closes the connection: a broken startup, a message type the
@@ -493,14 +494,19 @@ namespace frontend::postgres {
         // An error inside an explicit transaction block fails the block: every
         // ReadyForQuery reports 'E' until ROLLBACK or COMMIT ends it. Outside a
         // block there is nothing to fail and the status stays 'I'.
-        transaction_man_.mark_failed();
+        sql_session_.mark_failed();
+        if (sql_session_.broken()) {
+            send_then(build_error_response(writer_, sqlstate, std::move(message), error_severity::fatal()),
+                      [this] { finish(); });
+            return;
+        }
         if (ready_for_query_at_sync) {
             // Inside an extended-query pipeline the ErrorResponse goes alone:
             // the Sync that ends the pipeline answers the ReadyForQuery.
             send_packet(build_error_response(writer_, sqlstate, std::move(message), severity));
         } else {
             send_packet_merged({build_error_response(writer_, sqlstate, std::move(message), severity),
-                                build_ready_for_query(writer_, transaction_man_.get_transaction_status())});
+                                build_ready_for_query(writer_, wire_transaction_status())});
         }
     }
 } // namespace frontend::postgres

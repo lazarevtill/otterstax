@@ -42,6 +42,7 @@ set(${PROJECT_NAME}_SOURCES
     test_constant_aggregates.cpp
     test_expression_subqueries.cpp
     test_engine_transactions.cpp
+    test_native_sql_session.cpp
 )
 
 add_executable(${PROJECT_NAME} ${${PROJECT_NAME}_SOURCES})
@@ -65,6 +66,7 @@ target_link_libraries(
     actor-zeta::actor-zeta
     otterbrix::otterbrix
     Catch2::Catch2
+    Boost::filesystem
     otterbrix_log
 )
 

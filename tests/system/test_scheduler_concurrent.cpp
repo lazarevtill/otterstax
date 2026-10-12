@@ -230,7 +230,7 @@ TEST_CASE("scheduler handles N parallel sessions without hanging") {
         futs.push_back(actor_zeta::send(scheduler->address(),
                                         &Scheduler::execute,
                                         static_cast<session_hash_t>(i + 1),
-                                        sql)
+                                        sql, execution_context{})
                            .second);
     }
 
@@ -315,7 +315,7 @@ TEST_CASE("slow MySQL connector does not starve other sessions") {
         auto fut = actor_zeta::send(scheduler->address(),
                                     &Scheduler::execute,
                                     static_cast<session_hash_t>(1000),
-                                    std::string("SELECT 1"))
+                                    std::string("SELECT 1"), execution_context{})
                        .second;
         auto r = await_session(std::move(fut), WAIT_TIMEOUT, resource);
         REQUIRE_FALSE(r.has_error());
@@ -332,7 +332,7 @@ TEST_CASE("slow MySQL connector does not starve other sessions") {
         futs.push_back(actor_zeta::send(scheduler->address(),
                                         &Scheduler::execute,
                                         static_cast<session_hash_t>(i + 1),
-                                        std::string("SELECT 1"))
+                                        std::string("SELECT 1"), execution_context{})
                            .second);
     }
     std::vector<core::result_wrapper_t<session_payload>> results;

@@ -4,6 +4,9 @@ Each tenant needs a separate server process, data directory, connector
 configuration and network endpoint. The scheduler and catalog do not enforce
 permissions between tenants inside one process.
 
+See [transaction semantics and current protocol limits](transactions.md) before
+using native transaction control or client pipelines.
+
 ## Storage
 
 The storage directory comes from `--data-dir`, then `OTTERSTAX_DATA_DIR`, then

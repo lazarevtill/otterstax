@@ -22,6 +22,7 @@ namespace frontend::mysql {
         , next_statement_id_(0)
         , client_max_packet_size_(DEFAULT_MAX_PACKET_SIZE)
         , scheduler_(scheduler)
+        , sql_session_(resource, scheduler, true)
         , state_(connection_state::HANDSHAKE)
         , log_(get_logger(logger_tag::MYSQL_CONNECTION)) {
         assert(log_.is_valid());
@@ -148,7 +149,12 @@ namespace frontend::mysql {
                    static_cast<uint16_t>(error_code),
                    message,
                    static_cast<int>(sequence_id_));
-        send_packet(build_error(writer_, sequence_id_++, error_code, std::move(message)));
+        sql_session_.mark_failed();
+        if (sql_session_.broken()) {
+            send_then(build_error(writer_, sequence_id_++, error_code, std::move(message)), [this] { finish(); });
+        } else {
+            send_packet(build_error(writer_, sequence_id_++, error_code, std::move(message)));
+        }
     }
 
     void mysql_connection::send_malformed_packet_error(std::string message) {

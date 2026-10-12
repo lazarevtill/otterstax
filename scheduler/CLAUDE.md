@@ -32,10 +32,10 @@ All return `unique_future<core::result_wrapper_t<session_payload>>`:
 
 | Handler | Caller | Purpose |
 |---------|--------|---------|
-| `execute(id, sql)` | FlightSQL/MySQL/PG/Spark frontend | Full query: parse → schema → dispatch → translate |
-| `execute_statement(id)` | Frontend (prepared stmt execute) | Execute a previously prepared statement |
-| `execute_prepared_statement(id, params)` | Frontend | Bind parameters then execute |
-| `prepare_schema(id, sql)` | Frontend (prepare phase) | Parse + schema-only, no execution |
+| `execute(id, sql, context)` | FlightSQL/MySQL/PG/Spark frontend | Full query: parse → schema → dispatch → translate |
+| `execute_statement(id, context)` | Frontend (prepared stmt execute) | Execute a previously prepared statement |
+| `execute_prepared_statement(id, params, context)` | Frontend | Bind parameters then execute |
+| `prepare_schema(id, sql, context)` | Frontend (prepare phase) | Parse + schema-only, no execution |
 | `close_statement(id)` | Frontend (statement close / refused prepare / Spark describe) | Drop a prepared statement that will not be executed; idempotent |
 | `execute_plan(id, data)` | Spark frontend (DataFrame) | `execute` of a pre-built plan (`ParsedQueryDataPtr`): no parse |
 | `prepare_plan(id, data)` | Spark frontend (`df.schema`) | `prepare_schema` of a pre-built plan: schema only, no execution |
@@ -45,6 +45,21 @@ Frontends await the returned future via `frontend/common/asio_future_bridge.hpp`
 gRPC form, `frontend/spark_connect_server/await_future.hpp`); no result is ever
 pushed to a frontend through a condvar. The Scheduler's own `pump_cv_` is
 infrastructure: it only wakes `loop_thread_` when the inbox is non-empty.
+
+## Connection execution context
+
+A request ID comes from `next_request_id()` and owns a prepared plan. It is not
+an engine session hash. `execution_context` is a value copied through actor
+messages; a native connection retains its engine session while Flight/Spark
+one-shot requests create independent contexts. Prepared execution supplies the
+current context, rather than reusing the transaction state from prepare time.
+
+Scheduler owns the count of outstanding requests per full persistent session
+identity. `close_session(context)` refuses new work for that closing session,
+waits for outstanding work, rolls back through the Worker and removes the entry.
+A frontend timing out and abandoning its future does not cancel that cleanup.
+The Worker rejects remote execution and external side effects in local
+transactions before sending work to their managers.
 
 ## Worker pipeline
 

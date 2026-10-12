@@ -1,10 +1,17 @@
 # CLAUDE.md
 
+Native connections own `common/sql_session`, which retains the engine session
+across simple queries, prepared execution and schema probes. Transaction state
+drives PostgreSQL ReadyForQuery/CommandComplete and MySQL OK/EOF flags.
+Errors abort the local block; connection cleanup rolls it back after outstanding
+work finishes. PostgreSQL SQL `DEALLOCATE` releases actual frontend/Worker
+prepared state. See [transaction semantics](../docs/transactions.md), including
+the unresolved extended-protocol implicit transaction boundary.
+
 All four frontends receive the immutable client access policy created by main.
 Keycloak mode requires TLS and verifies tokens before protocol operations.
 Native TLS negotiation uses the shared transport and callback lifetime accounting;
 gRPC credentials authenticate each call. See [security](../security/CLAUDE.md).
-
 
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -234,6 +241,17 @@ Packet encoding/decoding lives in `{mysql,postgres}_server/packet/` and `{mysql,
 What a PySpark user can and cannot do is in `docs/spark_connect_unsupported.md`. Tests: `tests/unit/spark_connect/` (`test_unit_spark_connect`), `tests/system/test_spark_plan_execution.cpp` (`[spark-plan]`), `tests/system/test_prepare_plan.cpp`, and the PySpark client matrix (`tests/CLAUDE.md`).
 
 ## Port Assignments
+
+MySQL and PostgreSQL bind the configured `service.mysql.host` and
+`service.postgres.host` IP addresses. Their default is `0.0.0.0`.
+
+The Flight core's optional Basic authentication uses OpenSSL-generated bearer
+tokens with synchronized storage. Its token policy sets a lifetime and a maximum
+active-token count (defaults: one hour, 4096). Expired tokens are rejected and
+reclaimed; reaching capacity rejects new handshakes without evicting valid
+sessions. Anonymous handshakes allocate no tokens. The executable selects
+anonymous authentication behind the gRPC credentials layer; these Basic-auth library controls do not authenticate
+production clients or provide Keycloak integration.
 
 | Server | Default port | CMake target |
 |--------|-------------|--------------|

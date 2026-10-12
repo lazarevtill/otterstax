@@ -9,6 +9,7 @@ set(COMMON_SERVER_HEADERS
 )
 
 set(COMMON_SERVER_SOURCES
+     sql_session.cpp
      frontend_connection.cpp
      packet_reader_base.cpp
      packet_writer_base.cpp

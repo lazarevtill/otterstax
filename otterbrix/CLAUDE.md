@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+`OtterbrixStatement::context` carries the execution session independently of the
+request ID. Execution, plan-only schema validation and relation schema probes
+must use that session; creating a fresh session inside the adapter breaks native
+transaction isolation and rollback.
+
 The engine dependency uses the local recipe in `cmake/conan-recipes/otterbrix`,
 exported before `conan install`. Its pinned revision includes positional INSERT,
 EXISTS schema planning, failed-transaction undo and initial table-checkpoint

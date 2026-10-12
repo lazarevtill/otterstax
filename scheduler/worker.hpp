@@ -10,6 +10,7 @@
 #include "scheduler/session_data.hpp"
 #include "otterbrix/schema/schema_utils.hpp"
 #include "utility/session.hpp"
+#include "utility/execution_context.hpp"
 
 #include <core/result_wrapper.hpp>
 
@@ -71,12 +72,12 @@ public:
 
     std::pmr::memory_resource* resource() const noexcept { return resource_; }
 
-    unique_future<session_result> execute(session_hash_t id, std::string sql);
-    unique_future<session_result> execute_statement(session_hash_t id);
+    unique_future<session_result> execute(session_hash_t id, std::string sql, execution_context context);
+    unique_future<session_result> execute_statement(session_hash_t id, execution_context context);
     unique_future<session_result>
     execute_prepared_statement(session_hash_t id,
-                               std::pmr::vector<components::types::logical_value_t> parameters);
-    unique_future<session_result> prepare_schema(session_hash_t id, std::string sql);
+                               std::pmr::vector<components::types::logical_value_t> parameters, execution_context context);
+    unique_future<session_result> prepare_schema(session_hash_t id, std::string sql, execution_context context);
     unique_future<session_result> close_statement(session_hash_t id);
     unique_future<session_result> execute_plan(session_hash_t id, ParsedQueryDataPtr data);
     unique_future<session_result> prepare_plan(session_hash_t id, ParsedQueryDataPtr data);

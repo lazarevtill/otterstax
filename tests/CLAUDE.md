@@ -1,11 +1,11 @@
 # CLAUDE.md
 
-`test_s3_tls.py --server PATH` owns an HTTPS object fixture and checks S3
-CA/hostname validation, environment credentials and private staging cleanup.
-
-File permissions are covered by `unit/config/test_file_access.cpp`,
-`system/test_file_authorization.cpp` (real imports and all export formats),
-and SQL checks in the protocol fixture.
+`test_native_sql_session.cpp` covers local transaction isolation, prepared plans,
+transactional schema visibility, failure rollback, MySQL autocommit and cleanup
+after a timed-out request. `test_native_transactions.py --server PATH` exercises
+the wire protocols with psycopg, PyMySQL and binary MySQL prepared commands in an
+owned server/data directory. `test_request_identity.cpp` checks concurrent
+allocation of unique request handles.
 
 Client security claim/config tests live under `unit/config`. The standalone
 `test_client_security.py --server PATH` starts an owned server with a local HTTPS
@@ -15,23 +15,25 @@ inside a Docker-capable integration client on that network and owns a separate
 temporary Keycloak container. Both generate their own credentials and storage.
 These suites require a local server binary; do not point them at deployed services.
 
+File permissions are covered by `unit/config/test_file_access.cpp` (descriptor
+races, links, limits, atomic publication), `system/test_file_authorization.cpp`
+(real engine imports and all three export formats), and SQL checks in the protocol
+fixture. `test_s3_tls.py --server PATH` owns an HTTPS object fixture and checks S3
+CA/hostname validation, environment credentials and private staging cleanup.
 
 `system/test_kafka_recovery_errors.cpp` covers invalid persisted registries,
 missing checkpoints, worker startup errors, offsets-name collisions and duplicate
 or mismatched SOURCE/STREAM DDL. Failed operations must preserve existing data.
 
-
-`system/test_kafka_offsets.cpp` checks transactional checkpoint replacement and
-rollback. The broker suite ingests 2050 rows across batches and verifies that
-aborted producer records remain invisible to a SOURCE.
-
-`system/test_kafka_batch_loop.cpp` injects repeated batch-apply failures and
-verifies retained payloads, processing order, empty polls and shutdown.
+Kafka regression coverage includes batch ordering and retry failures
+(`test_kafka_batch_loop.cpp`), transactional checkpoint replacement and rollback,
+and rejection of failed or invalid checkpoint reads (`test_kafka_offsets.cpp`).
+The broker integration test ingests 2050 rows and checks that aborted producer
+transactions do not appear in a SOURCE.
 
 The Spark 3.5 client environment pins NumPy 1.26.4 and PyArrow 25.0.1 together.
 PyArrow 26 requires NumPy 2, which Spark 3.5 does not support. Each dependency
 environment runs `pip check`; every client must import before the image builds.
-
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 

@@ -558,13 +558,13 @@ TEST_CASE("Scheduler: external statement via prepare_schema + execute_statement 
             "CREATE EXTERNAL TABLE " + db + "." + tbl + " WITH (location = '" + src + "', format = 'parquet')";
 
         // GetFlightInfo phase — returns an (empty) schema and stores the metadata.
-        auto [ns1, fut1] = actor_zeta::send(s.scheduler, &Scheduler::prepare_schema, id, sql);
+        auto [ns1, fut1] = actor_zeta::send(s.scheduler, &Scheduler::prepare_schema, id, sql, execution_context{});
         auto r1 = await_session(std::move(fut1), 10000ms, s.resource);
         INFO("prepare_schema error: " << (r1.has_error() ? r1.error().what.c_str() : ""));
         REQUIRE_FALSE(r1.has_error());
 
         // DoGet phase — reuses the stored statement and performs the load.
-        auto [ns2, fut2] = actor_zeta::send(s.scheduler, &Scheduler::execute_statement, id);
+        auto [ns2, fut2] = actor_zeta::send(s.scheduler, &Scheduler::execute_statement, id, execution_context{});
         auto r2 = await_session(std::move(fut2), 10000ms, s.resource);
         INFO("execute_statement error: " << (r2.has_error() ? r2.error().what.c_str() : ""));
         REQUIRE_FALSE(r2.has_error());

@@ -10,6 +10,7 @@
 #include "scheduler/session_data.hpp"
 #include "scheduler/worker.hpp"
 #include "utility/session.hpp"
+#include "utility/execution_context.hpp"
 
 #include <atomic>
 #include <boost/lockfree/queue.hpp>
@@ -72,13 +73,17 @@ public:
 
     std::pmr::memory_resource* resource() const noexcept { return resource_; }
 
-    unique_future<session_result> execute(session_hash_t id, std::string sql);
-    unique_future<session_result> execute_statement(session_hash_t id);
+    unique_future<session_result> execute(session_hash_t id, std::string sql, execution_context context);
+    unique_future<session_result> execute_statement(session_hash_t id, execution_context context);
     unique_future<session_result>
     execute_prepared_statement(session_hash_t id,
-                               std::pmr::vector<components::types::logical_value_t> parameters);
-    unique_future<session_result> prepare_schema(session_hash_t id, std::string sql);
+                               std::pmr::vector<components::types::logical_value_t> parameters, execution_context context);
+    unique_future<session_result> prepare_schema(session_hash_t id, std::string sql, execution_context context);
     unique_future<session_result> close_statement(session_hash_t id);
+    // Wait for this connection's outstanding work, then roll back and release
+    // its engine session. A timed-out caller may drop its future; cleanup still
+    // runs on the Scheduler after the request actually finishes.
+    unique_future<session_result> close_session(execution_context context);
     // Pre-built plans (the Spark Connect frontend translates a DataFrame
     // relation straight into a logical plan): execute runs it like a parsed
     // statement, prepare describes its result schema without running it.
@@ -90,6 +95,7 @@ public:
                                                         &Scheduler::execute_prepared_statement,
                                                         &Scheduler::prepare_schema,
                                                         &Scheduler::close_statement,
+                                                        &Scheduler::close_session,
                                                         &Scheduler::execute_plan,
                                                         &Scheduler::prepare_plan>;
 
@@ -100,6 +106,14 @@ public:
     std::pair<bool, actor_zeta::detail::enqueue_result> enqueue_impl(actor_zeta::mailbox::message_ptr msg);
 
 private:
+    struct connection_work {
+        size_t pending{0};
+        bool closing{false};
+        std::optional<actor_zeta::promise<bool>> drained;
+    };
+    std::unordered_map<session_id, connection_work> connections_;
+    bool start_request(const execution_context& context);
+    void finish_request(const execution_context& context);
     // Hands one message to the session's Worker (`workers_[id % N]`) and returns
     // the Worker's future for the handler to await. Synchronous on purpose: the
     // handler's Tracy zone lives here, on one thread, closed before the await.

@@ -178,6 +178,8 @@ actor_zeta::behavior_t Scheduler::behavior(actor_zeta::mailbox::message* msg) {
         co_await actor_zeta::dispatch(this, &Scheduler::execute_prepared_statement, msg);
     } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::prepare_schema>) {
         co_await actor_zeta::dispatch(this, &Scheduler::prepare_schema, msg);
+    } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::close_session>) {
+        co_await actor_zeta::dispatch(this, &Scheduler::close_session, msg);
     } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::close_statement>) {
         co_await actor_zeta::dispatch(this, &Scheduler::close_statement, msg);
     } else if (cmd == actor_zeta::msg_id<Scheduler, &Scheduler::execute_plan>) {
@@ -204,42 +206,70 @@ Scheduler::route(Method method, session_hash_t id, Args&&... args) {
     return std::move(fut);
 }
 
-actor_zeta::unique_future<Scheduler::session_result> Scheduler::execute(session_hash_t id, std::string sql) {
+actor_zeta::unique_future<Scheduler::session_result> Scheduler::execute(session_hash_t id, std::string sql, execution_context context) {
+    if (!start_request(context)) {
+        co_return core::error_t{core::error_code_t::invalid_parameter,
+                               std::pmr::string{"connection session is closing", resource()}};
+    }
+
     unique_future<session_result> fut;
     {
         OTX_ZONE_N("Scheduler::execute");
-        fut = route(&Worker::execute, id, std::move(sql));
+        fut = route(&Worker::execute, id, std::move(sql), context);
     }
-    co_return co_await std::move(fut);
+    auto result = co_await std::move(fut);
+    finish_request(context);
+    co_return result;
 }
 
-actor_zeta::unique_future<Scheduler::session_result> Scheduler::execute_statement(session_hash_t id) {
+actor_zeta::unique_future<Scheduler::session_result> Scheduler::execute_statement(session_hash_t id, execution_context context) {
+    if (!start_request(context)) {
+        co_return core::error_t{core::error_code_t::invalid_parameter,
+                               std::pmr::string{"connection session is closing", resource()}};
+    }
+
     unique_future<session_result> fut;
     {
         OTX_ZONE_N("Scheduler::execute_statement");
-        fut = route(&Worker::execute_statement, id);
+        fut = route(&Worker::execute_statement, id, context);
     }
-    co_return co_await std::move(fut);
+    auto result = co_await std::move(fut);
+    finish_request(context);
+    co_return result;
 }
 
 actor_zeta::unique_future<Scheduler::session_result>
 Scheduler::execute_prepared_statement(session_hash_t id,
-                                      std::pmr::vector<components::types::logical_value_t> parameters) {
+                                      std::pmr::vector<components::types::logical_value_t> parameters, execution_context context) {
+    if (!start_request(context)) {
+        co_return core::error_t{core::error_code_t::invalid_parameter,
+                               std::pmr::string{"connection session is closing", resource()}};
+    }
+
     unique_future<session_result> fut;
     {
         OTX_ZONE_N("Scheduler::execute_prepared_statement");
-        fut = route(&Worker::execute_prepared_statement, id, std::move(parameters));
+        fut = route(&Worker::execute_prepared_statement, id, std::move(parameters), context);
     }
-    co_return co_await std::move(fut);
+    auto result = co_await std::move(fut);
+    finish_request(context);
+    co_return result;
 }
 
-actor_zeta::unique_future<Scheduler::session_result> Scheduler::prepare_schema(session_hash_t id, std::string sql) {
+actor_zeta::unique_future<Scheduler::session_result> Scheduler::prepare_schema(session_hash_t id, std::string sql, execution_context context) {
+    if (!start_request(context)) {
+        co_return core::error_t{core::error_code_t::invalid_parameter,
+                               std::pmr::string{"connection session is closing", resource()}};
+    }
+
     unique_future<session_result> fut;
     {
         OTX_ZONE_N("Scheduler::prepare_schema");
-        fut = route(&Worker::prepare_schema, id, std::move(sql));
+        fut = route(&Worker::prepare_schema, id, std::move(sql), context);
     }
-    co_return co_await std::move(fut);
+    auto result = co_await std::move(fut);
+    finish_request(context);
+    co_return result;
 }
 
 actor_zeta::unique_future<Scheduler::session_result> Scheduler::close_statement(session_hash_t id) {
@@ -269,4 +299,40 @@ actor_zeta::unique_future<Scheduler::session_result> Scheduler::prepare_plan(ses
         fut = route(&Worker::prepare_plan, id, std::move(data));
     }
     co_return co_await std::move(fut);
+}
+
+bool Scheduler::start_request(const execution_context& context) {
+    if (!context.persistent) return true;
+    auto& work = connections_[context.engine_session];
+    if (work.closing) return false;
+    ++work.pending;
+    return true;
+}
+
+void Scheduler::finish_request(const execution_context& context) {
+    if (!context.persistent) return;
+    auto it = connections_.find(context.engine_session);
+    assert(it != connections_.end() && it->second.pending > 0);
+    auto& work = it->second;
+    if (--work.pending == 0 && work.drained) work.drained->set_value(true);
+}
+
+actor_zeta::unique_future<Scheduler::session_result> Scheduler::close_session(execution_context context) {
+    const auto key = context.engine_session;
+    auto& work = connections_[key];
+    if (work.closing) {
+        co_return core::error_t{core::error_code_t::invalid_parameter,
+                               std::pmr::string{"connection cleanup already requested", resource()}};
+    }
+    work.closing = true;
+    if (work.pending != 0) {
+        work.drained.emplace(resource());
+        auto drained = work.drained->get_future();
+        co_await std::move(drained);
+    }
+    context.in_transaction = false;
+    const auto request = next_request_id();
+    auto result = co_await route(&Worker::execute, request, std::string{"ROLLBACK;"}, context);
+    connections_.erase(key);
+    co_return result;
 }
