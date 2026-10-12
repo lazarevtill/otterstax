@@ -2,6 +2,7 @@ project(test_utils)
 
 set(${PROJECT_NAME}_SOURCES
     main.cpp
+    test_actor_mailbox.cpp
     test_asio_future_bridge.cpp
     test_ch_connector.cpp
     test_ch_statement.cpp

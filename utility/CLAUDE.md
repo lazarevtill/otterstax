@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+`actor_mailbox.hpp` owns handler and continuation execution on one thread.
+Use serial execution for blocking backend actors and interleaved execution for
+Scheduler/Worker actors that await other actors. Sending only enqueues. Keep
+the mailbox as the actor's last member so its destructor drains accepted work
+and joins before actor state is destroyed. Message storage must outlive its
+behavior, and every pending await must remain eligible for resumption.
+
 `next_request_id()` allocates process-unique request/prepared-statement handles
 with an atomic counter. Do not use an engine session's hash as an identity:
 different engine sessions can have equal hashes. `execution_context` separately
