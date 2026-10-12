@@ -92,4 +92,5 @@ RUN cmake -S . -B build/Release \
 EXPOSE 8086
 
 WORKDIR /app/build/Release
+ENV OTTERSTAX_DATA_DIR=/app/data
 CMD [ "./server" ]

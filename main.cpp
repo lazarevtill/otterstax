@@ -2,6 +2,8 @@
 // Copyright 2025-2026  OtterStax
 
 #include <memory>
+#include <cstdlib>
+#include <iostream>
 #include <memory_resource>
 #include <sstream>
 #include <string>
@@ -21,31 +23,25 @@
 #include "otterbrix/config.hpp"
 #include "config/config.hpp"
 #include "utility/logger.hpp"
+#include "utility/data_directory_lock.hpp"
 #include "utility/tracy_profiler.hpp"
 
 namespace po = boost::program_options;
 
-namespace {
-    // Engine data dir; the server's own logs live there too.
-    constexpr const char* DATA_DIR = "/tmp/test_collection_sql/base";
-} // namespace
-
 int main(int argc, char* argv[]) {
-
-    // Logging
-    initialize_all_loggers(DATA_DIR);
-
-    auto log = get_logger(logger_tag::Main);
-    log->info("Starting server...");
     // Load configuration from YAML file
     std::string config_path = "config.yaml";
+    const char* configured_data_dir = std::getenv("OTTERSTAX_DATA_DIR");
+    std::string data_dir = configured_data_dir ? configured_data_dir : "./data";
     
     // Allow overriding config path via command line
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help,h", "Show help message")
         ("config", po::value<std::string>(&config_path)->default_value(config_path),
-         "Path to configuration file");
+         "Path to configuration file")
+        ("data-dir", po::value<std::string>(&data_dir)->default_value(data_dir),
+         "Engine and log directory (default: OTTERSTAX_DATA_DIR or ./data)");
 
     // Parse arguments
     po::variables_map vm;
@@ -53,20 +49,32 @@ int main(int argc, char* argv[]) {
         po::store(po::parse_command_line(argc, argv, desc), vm);
         po::notify(vm);
     } catch (const std::exception& e) {
-        log->error("Error parsing arguments: {}", e.what());
-        std::ostringstream oss;
-        oss << desc;
-        log->error("{}", oss.str());
+        std::cerr << "Error parsing arguments: " << e.what() << '\n' << desc << '\n';
         return 1;
     }
 
     // Show help message if requested
     if (vm.count("help")) {
-        std::ostringstream oss;
-        oss << desc;
-        log->info("{}", oss.str());
+        std::cout << desc << '\n';
         return 0;
     }
+    if (data_dir.empty()) {
+        std::cerr << "The data directory must not be empty\n";
+        return 1;
+    }
+    std::unique_ptr<otterstax::data_directory_lock> data_lock;
+    struct logger_lifetime {
+        ~logger_lifetime() { spdlog::shutdown(); }
+    } logger_shutdown;
+    try {
+        data_lock = std::make_unique<otterstax::data_directory_lock>(data_dir);
+        initialize_all_loggers(data_dir);
+    } catch (const std::exception& error) {
+        std::cerr << "Cannot initialize the data directory: " << error.what() << '\n';
+        return 1;
+    }
+    auto log = get_logger(logger_tag::Main);
+    log->info("Starting server...");
 
     // Load server configuration from the single YAML config file. This carries
     // both the wire-server settings and, under `connections:`, every remote
@@ -82,7 +90,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     config::ServiceConfig server_config = std::move(loaded.value());
-
     // ComponentManager spawns the s3 connector actor, which initialises Arrow's
     // S3 subsystem; the process owes Arrow a FinalizeS3 before exit on every
     // path below, including the aborted-startup returns. Declared before the
@@ -91,7 +98,7 @@ int main(int argc, char* argv[]) {
 
     // Create component manager
     OTX_MESSAGE_L("startup: creating component manager");
-    ComponentManager cmanager(make_create_config(DATA_DIR), server_config.connections);
+    ComponentManager cmanager(make_create_config(data_dir), server_config.connections);
 
     if (auto recovered = cmanager.recover(); recovered.contains_error()) {
         log->error("Cannot recover persisted Kafka objects: {}", recovered.what.c_str());

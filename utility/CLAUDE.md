@@ -12,6 +12,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Key Types
 
+### `data_directory_lock.hpp`
+
+The server holds an exclusive OS lock on `.otterstax.lock` in its data directory
+before starting loggers or the engine. Another owner of the same directory
+fails startup. Closing the owner releases the lock, including after process
+termination; the lock file stays in place to preserve one shared lock identity.
+
+
 ### `session_payload` — lives in `scheduler/session_data.hpp`, not here
 
 `session_payload` holds the output of a completed query: `schema`

@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+Engine storage and application logs use `--data-dir`, then `OTTERSTAX_DATA_DIR`,
+then `./data`. Docker images set `OTTERSTAX_DATA_DIR=/app/data`. Tenant instances
+must use separate storage and connector configuration. `--help` prints to stdout
+and exits before creating storage or starting loggers.
+The server exclusively locks its data directory before starting loggers or the
+engine. A second server using that directory fails startup. Native listeners
+accept `service.mysql.host` and `service.postgres.host` as IP addresses.
+
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What This Project Is

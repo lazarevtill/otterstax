@@ -185,4 +185,5 @@ COPY ./tests/scripts/config.yaml ./config.yaml
 # Tracy profiler port (active only when built with --build-arg WITH_TRACY=true)
 EXPOSE 8086
 
+ENV OTTERSTAX_DATA_DIR=/app/data
 CMD [ "./server" ]

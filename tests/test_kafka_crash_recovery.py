@@ -12,15 +12,13 @@ restart the server — so it drives it directly. It needs a reachable broker
 Two lifecycle modes:
 
   Native (--local): launches the server binary itself (Popen + kill -9 +
-  restart) on a clean data dir it wipes. Needs a built server binary.
+  restart) in an owned temporary data directory. Needs a built server binary.
 
     python tests/test_kafka_crash_recovery.py --local
-    # Debug build whose otterbrix asserts would SIGABRT:
-    python tests/test_kafka_crash_recovery.py --local --ld-preload /tmp/noassert.so
 
   Docker (--docker-container <name>): the server is a container; the crash is
   `docker kill` (SIGKILL) and recovery is `docker start` of the SAME container
-  (its writable layer — and thus the engine's /tmp/test_collection_sql — survives,
+  (its writable layer, including the configured engine data directory, survives,
   so no volume is needed). This runs INSIDE the test-client container on the docker
   network (which already ships psycopg + confluent-kafka), so endpoints are the
   docker-network ones (test-otterstax:8817, kafka:9092) for both the driver's kafka
@@ -49,7 +47,7 @@ import sys
 import json
 import time
 import uuid
-import shutil
+import tempfile
 import signal
 import argparse
 import threading
@@ -70,12 +68,10 @@ FANIN_BATCH = 1500                  # §5.3 fan-in: rows per source per batch (e
 PG_WAIT_S = 25
 DOCKER_PG_WAIT_S = 90   # docker start + WAL recover has more headroom than the native binary
 WAIT_S = 60
-# Hardcoded in main.cpp: ComponentManager(make_create_config("/tmp/test_collection_sql/base")).
-DATA_DIR = "/tmp/test_collection_sql"
 
 
 class KafkaCrashRecoveryTest:
-    def __init__(self, local, server_bin, ld_preload=None, docker_container=None):
+    def __init__(self, local, server_bin, docker_container=None):
         self.docker_container = docker_container
         # docker mode runs from within the docker network (test-client), so it uses
         # the docker-network endpoints (test-otterstax:8817, kafka:9092) regardless
@@ -84,7 +80,7 @@ class KafkaCrashRecoveryTest:
         self.host = get_host(endpoints_local)
         self.broker = get_kafka_broker(endpoints_local)
         self.server_bin = os.path.abspath(server_bin)
-        self.ld_preload = ld_preload
+        self.data_dir = tempfile.TemporaryDirectory(prefix="otterstax-kafka-crash-") if not docker_container else None
         self.proc = None
         print(f"host={self.host} broker={self.broker} "
               f"{'docker=' + docker_container if docker_container else 'server_bin=' + self.server_bin}")
@@ -94,16 +90,14 @@ class KafkaCrashRecoveryTest:
     def start_server(self):
         if self.docker_container:
             # docker start restarts the SAME container: its writable layer (and the
-            # engine's /tmp/test_collection_sql) is intact, so recover() replays.
+            # engine data directory) is intact, so recover() replays.
             # Idempotent — a no-op success if the container is already running.
             subprocess.run(["docker", "start", self.docker_container], check=True,
                            stdout=subprocess.DEVNULL)
             self._wait_for_pg(DOCKER_PG_WAIT_S)
             return
         env = dict(os.environ)  # inherits LD_LIBRARY_PATH etc.
-        if self.ld_preload:
-            env["LD_PRELOAD"] = self.ld_preload
-        self.proc = subprocess.Popen([self.server_bin], env=env,
+        self.proc = subprocess.Popen([self.server_bin, "--data-dir", self.data_dir.name], env=env,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                      preexec_fn=os.setsid)  # own process group → clean kill
         self._wait_for_pg(PG_WAIT_S)
@@ -132,7 +126,6 @@ class KafkaCrashRecoveryTest:
             os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
         except ProcessLookupError:
             pass
-        subprocess.run(["pkill", "-9", "-f", self.server_bin], check=False)  # survives one signal to a stale pid
         try:
             self.proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
@@ -204,17 +197,15 @@ class KafkaCrashRecoveryTest:
         # docker mode: the data dir lives in the container's writable layer, not
         # on the host — the clean slate is a fresh container recreated by the
         # harness before this test (docker-run-tests.sh Step 8c). Here we only
-        # ensure the server is up. Native mode: wipe the host dir + launch.
-        if not self.docker_container:
-            shutil.rmtree(DATA_DIR, ignore_errors=True)
+        # ensure the server is up. Native mode owns a fresh temporary directory.
         self.start_server()
 
     def cleanup(self):
         self.kill_server()
         # Native owns the host data dir; docker leaves teardown (compose down) to
         # the harness so it never touches the container's internal storage.
-        if not self.docker_container:
-            shutil.rmtree(DATA_DIR, ignore_errors=True)
+        if self.data_dir is not None:
+            self.data_dir.cleanup()
 
     # --- cases ---
 
@@ -467,9 +458,6 @@ def main_test():
     parser.add_argument("--local", action="store_true",
                         help="Use localhost endpoints instead of docker-network hostnames")
     parser.add_argument("--server-bin", default="build/Debug/server", help="path to the otterstax server binary")
-    parser.add_argument("--ld-preload", default=None,
-                        help="optional path forwarded into the server's LD_PRELOAD "
-                             "(e.g. a local __assert_fail stub for a Debug build)")
     parser.add_argument("--docker-container", default=None, metavar="NAME",
                         help="drive a containerised server instead of a local binary: the crash is "
                              "`docker kill NAME` and recovery is `docker start NAME` (host-driven; "
@@ -477,7 +465,6 @@ def main_test():
     args = parser.parse_args()
     try:
         KafkaCrashRecoveryTest(local=args.local, server_bin=args.server_bin,
-                               ld_preload=args.ld_preload,
                                docker_container=args.docker_container).run_all_tests()
         print("\n" + "=" * 70)
         print("\033[92m✅ ALL TESTS PASSED - Kafka Crash-Recovery (exactly-once)\033[0m")

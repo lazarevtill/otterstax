@@ -7,6 +7,7 @@ set(${PROJECT_NAME}_SOURCES
     test_ch_statement.cpp
     test_connector_errors.cpp
     test_connector_manager.cpp
+    test_data_directory_lock.cpp
     test_mysql_connector.cpp
     test_parse_port.cpp
     test_session.cpp
@@ -33,6 +34,7 @@ target_link_libraries(
     # test_asio_future_bridge.cpp runs one directly, so Boost.Asio is a real
     # dependency of this binary, not just a transitive include.
     Boost::boost
+    Boost::filesystem
     Catch2::Catch2
     otterbrix_log
 )
