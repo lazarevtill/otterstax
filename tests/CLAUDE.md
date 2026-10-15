@@ -8,6 +8,17 @@ The disruption case in `test_concurrency.py` requires `OTTERSTAX_RUN_DISRUPTION=
 It selects exactly one running container by Compose labels, requires server error
 3024 before the client read deadline, unpauses it in `finally`, and checks recovery.
 
+`test_kafka_crash_recovery.py` owns the server lifecycle and verifies SIGKILL.
+SOURCE/STREAM and fan-in cases use controlled input batches, with the suffix
+queued while the server is stopped. Worker input-offset commits form the barrier
+before reading every output record through the journal's high watermark; reaching
+the expected number of unique IDs is not sufficient. The INSERT crash waits for
+an actual uncommitted Kafka record while SQL is still in flight. A temporary
+producer quota on the owned Redpanda fixture holds that window open; `finally`
+removes the quota. Docker mode requires `--docker-broker-container`; native mode
+requires `rpk` on PATH. Unresolved Kafka transactions must reach read-committed
+EOF before the atomicity assertion. The regular integration harness runs this
+suite; sanitizer and Tracy runs retain their separate process-lifetime checks.
 
 Scheduler tests using `isolated_test_engine` own a unique temporary directory
 for each engine's catalog, WAL and logs. Keep the fixture alive until all actors
@@ -31,6 +42,11 @@ after a timed-out request. `test_native_transactions.py --server PATH` exercises
 the wire protocols with psycopg, PyMySQL and binary MySQL prepared commands in an
 owned server/data directory. `test_request_identity.cpp` checks concurrent
 allocation of unique request handles.
+
+Native session and await-bridge regressions distinguish completed storage and
+transaction errors from timeouts and closed actor channels. After a reported
+query error the session remains usable; an explicit failed transaction still
+requires rollback. The S3 TLS fixture also checks this through PostgreSQL.
 
 Client security claim/config tests live under `unit/config`. The standalone
 `test_client_security.py --server PATH` starts an owned server with a local HTTPS
@@ -154,7 +170,7 @@ every named group is in one place. A red case there is an otterstax regression, 
 | `[engine-defect-default]` | `tests/system/test_default_insert.cpp` | A column DEFAULT whose literal type differs from the declared column type is not stored when the INSERT omits the column: `n INT DEFAULT 7` reads back 0 (the integer literal is BIGINT), `v trio_t DEFAULT ROW(5, 'd', NULL)` reads back a member-wise zero/empty struct (the ROW members are literal-typed). No error anywhere: the engine's `agent_disk_t::storage_append_inner` fills the omitted column with `vector_t::set_value(row, default_value())`, and `set_value` refuses a value whose type differs from the vector's without writing it (assert-only), so the freshly built vector keeps its valid, zeroed slot. Each shape is one case straight against the engine and one through the scheduler stack; the engine-alone case failing the same way is what attributes the defect to the engine. The same-typed DEFAULTs (`BIGINT DEFAULT 7`, `STRING DEFAULT 'x'`, `DOUBLE DEFAULT 1.5`) are the control and run visibly under `[default]`. |
 | `[engine-defect-nullparam]` | `tests/system/test_dml_result_shape.cpp` | A prepared `SELECT id FROM dmldb.people WHERE id = $1` executed with a NULL parameter must answer no rows and keep its `id` column, as PostgreSQL answers `id = NULL` with an empty result and a RowDescription. On rc-2 the engine's `full_scan` cuts a comparison with a NULL parameter short with `make_drain_chunk` over an empty type list, so the result has no columns and `OtterbrixManager::execute` refuses it as `schema_error` (`SELECT returned a result without columns: the engine produced no typed output column for the statement`). rc-3's `full_scan` builds that drain chunk from the scan's types (`make_drain_chunk(guard_types_)`), which is what this case accepts. The visible `prepared matrix: a NULL parameter` stays the control: a NULL bound into an INSERT and read back through `IS NULL`. |
 | `[engine-defect-having]` | `tests/unit/parser/test_query_gen.cpp` | Two aggregates of one function differing only in their argument: `SELECT category, SUM(a) AS sa, SUM(b) AS sb ... HAVING SUM(b) > 1` must push down `HAVING SUM("b") > 1`. A transformer that resolves a HAVING aggregate by function name alone (`resolve_having_operand`) binds the operand to the first SUM of the SELECT list and writes `SUM("a")`; matching on the argument list (and DISTINCT) too is what this case pins. The only one of these tags outside `test_system`. |
-| `[engine-defect-checkpoint-crash]` | `tests/test_kafka_crash_recovery.py` | `kill -9` mid-ingest can land in the window before the ingested table's FIRST checkpoint completes: on restart the engine refuses the table file ("the selected root has no metadata pointer … either this table WAS checkpointed and its newest header slot was lost, or its first checkpoint crashed mid-flight"), the table is not replayed, and every read of it fails with `storage_reduce: no materialized storage to reduce over: <oid>`. Verified pre-existing: it reproduces 2/2 on the parent branch (pre-FlightSQL-migration image built from `feature/otterbrix-b2-migration`), so a red Step 8c there is an otterbrix storage defect, not an otterstax regression; the WAL replay itself works in the same log (records across the other tables replay fine). |
+| `[engine-defect-checkpoint-crash]` | `tests/test_kafka_crash_recovery.py` | SOURCE and STREAM recovery across verified SIGKILL, including fan-in and atomic INSERT VALUES. Controlled input batches and committed-offset barriers verify the complete output journal without duplicates or loss. |
 | `[describe-routing]` | `tests/system/test_single_backend_prepare_schema.cpp` | **Not an engine defect — an acceptance tag.** `Worker::prepare_schema` must hand a single-backend statement that carries no parameters to its backend's `describe` before it reads the plan stub, so that what a frontend is told at prepare is what the backend answers: `describe` probes every stub with the generated SQL wrapped in `SELECT * FROM (…) LIMIT 0` — `SELECT * FROM (…) AS otx_prepare_probe LIMIT 0` for MySQL and PostgreSQL, which refuse a derived table without an alias — and takes the column types off the answer, read by the translator `execute` reads its rows with. A raw-SQL sub-query stub is filled in place rather than replaced, keeping the text and qualifiers `execute` generates from. Four `TEMPLATE_TEST_CASE`s, each over ClickHouse, MySQL and PostgreSQL: `length(name) AS name` prepared and streamed as the type the backend answers for the function (UInt64, BIGINT, int4) while the plan has no type for the call (asserting the probe is the wrapped data query); a raw-SQL sub-query column prepared as the backend's type, where it reached the client as NA before; a JOIN with such a sub-query prepared from both described stubs, where the prepare failed outright before (`merge_schemas` saw the stub's NA and answered "OtterBrix collection is missing in catalog"); a probe the backend refuses failing the prepare with the backend's own `io_error`. Three more pin a backend's own widening: ClickHouse `COUNT(*) AS n` as UBIGINT/uint64 and `score + 1 AS score` as BIGINT/int64, MySQL `score + 1 AS score` as BIGINT/int64. Without that send each case is red with the plan's own type instead — a red case here is that routing gone, not a mock detail. The actor-level `backend describe: ` templates cover the refusals and the probe text. |
 
 ```bash
@@ -262,4 +278,5 @@ Best-effort SET must warn for each unapplied key without echoing its value.
 forms. `test_kafka_destinations.cpp` uses a real two-broker mock cluster to verify
 that an unlisted advertised broker receives no request, while an explicitly
 allowed broker receives the produce. It also checks CREATE side effects and
-recovery after an administrator removes a destination.
+recovery after an administrator removes a destination. `test_s3_errors.cpp`
+rejects missing endpoints and URL/authority/ARN paths before any network call.
