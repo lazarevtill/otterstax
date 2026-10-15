@@ -26,6 +26,7 @@
 #include <components/sql/transformer/utils.hpp>
 #include <components/types/types.hpp>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <random>
 #include <regex>
@@ -77,10 +78,11 @@ namespace frontend::postgres {
         // limit (PortalSuspended) and the next Execute on the same portal
         // continues from `emitted` without running the statement again.
         struct portal_meta {
-            portal_meta(portal_t params, prepared_stmt_meta& statement, std::vector<result_encoding> format);
+            portal_meta(portal_t params, std::shared_ptr<prepared_stmt_meta> statement, std::vector<result_encoding> format);
 
             portal_t params;
-            std::reference_wrapper<prepared_stmt_meta> statement;
+            // A bound portal outlives Close(statement) and unnamed Parse.
+            std::shared_ptr<prepared_stmt_meta> statement;
             std::vector<result_encoding> format;
             // Describe(portal) already gave the client a RowDescription.
             bool described;
@@ -134,6 +136,7 @@ namespace frontend::postgres {
         void handle_describe(describe_close_arg type, std::string name);
 
         bool do_close(describe_close_arg type, std::string name);
+        bool release_statement(session_hash_t id);
         bool try_deallocate(const std::string& query);
         void send_query_error(const core::error_t& error);
         // Appends a RowDescription (with the given result format codes) for a
@@ -158,7 +161,7 @@ namespace frontend::postgres {
                                  error_severity severity = error_severity::error());
 
         std::pmr::memory_resource* resource_;
-        std::pmr::unordered_map<std::string, prepared_stmt_meta> statement_name_map_;
+        std::pmr::unordered_map<std::string, std::shared_ptr<prepared_stmt_meta>> statement_name_map_;
         std::pmr::unordered_map<std::string, portal_meta> portals_;
         packet_writer writer_;
         actor_zeta::address_t scheduler_;

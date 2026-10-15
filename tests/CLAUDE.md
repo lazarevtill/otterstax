@@ -235,3 +235,10 @@ python -m pytest tests/test_flightsql_client_mysql_backend.py -v
 - `run_all_tests(self)`: `try: setup(); test_a(); test_b(); finally: cleanup()`. **Let exceptions propagate** — do not `except: print("fail")` and swallow, or the green ALL-PASSED banner will lie (a real bug in some older tests).
 - `main_test()` parses `--local`, runs `run_all_tests()`, prints the pass/fail banner, returns `0`/`1`; `sys.exit(main_test())` at the bottom.
 (Requires live Docker stack — run `docker compose -f compose.test.yml up -d` first. Connections are baked into the otterstax image from `tests/scripts/config.yaml` and registered at startup; no manual registration step.)
+
+## Prepared statement checks
+
+`test_pg_prepared_lifecycle.cpp` drives the real PostgreSQL server over raw
+sockets: duplicate names, statement and portal close, unnamed replacement, and
+rejected preparation cleanup. Its tracking parser delegates to the real parser
+and observes retained plan references to detect Worker leaks.

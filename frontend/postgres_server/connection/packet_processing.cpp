@@ -214,6 +214,18 @@ namespace frontend::postgres {
             return;
         }
 
+        if (!stmt.empty() && statement_name_map_.contains(stmt)) {
+            send_error_response(sql_state::DUPLICATE_PREPARED_STATEMENT,
+                                "Prepared statement already exists: " + stmt);
+            return;
+        }
+        // Even a failed unnamed Parse replaces the preceding unnamed statement.
+        // Bound portals retain their own ownership of its metadata.
+        if (stmt.empty() && !do_close(describe_close_arg::STATEMENT, stmt)) {
+            send_error_response(sql_state::INTERNAL_ERROR, "Unable to release prepared statement", error_severity::fatal());
+            return;
+        }
+
         const auto id = next_request_id();
         auto r = sql_session_.prepare(id, query);
 
@@ -229,16 +241,20 @@ namespace frontend::postgres {
                     result.parameter_count);
 
         if (result.parameter_count != specified_types.size()) {
+            if (!release_statement(id)) {
+                send_error_response(sql_state::INTERNAL_ERROR, "Unable to release prepared statement", error_severity::fatal());
+                return;
+            }
             send_error_response(sql_state::UNDEFINED_PARAMETER,
                                 "Parameter type left unspecified: specified " + std::to_string(specified_types.size()) +
                                     " out of " + std::to_string(result.parameter_count));
             return;
         }
 
-        // statements with identical name replace each other, together with their portals
-        do_close(describe_close_arg::STATEMENT, stmt);
         statement_name_map_.emplace(std::move(stmt),
-                                    prepared_stmt_meta(resource_,
+                                    std::allocate_shared<prepared_stmt_meta>(
+                                                       std::pmr::polymorphic_allocator<prepared_stmt_meta>{resource_},
+                                                       resource_,
                                                        id,
                                                        std::move(query),
                                                        result.parameter_count,
@@ -261,11 +277,16 @@ namespace frontend::postgres {
             return;
         }
 
-        if (num_params != it->second.parameter_count) {
+        if (num_params != it->second->parameter_count) {
             send_error_response(sql_state::UNDEFINED_PARAMETER,
                                 "Missing parameters in BIND to statement " + stmt + ": received " +
                                     std::to_string(num_params) + " out of required " +
-                                    std::to_string(it->second.parameter_count));
+                                    std::to_string(it->second->parameter_count));
+            return;
+        }
+
+        if (!portal_name.empty() && portals_.contains(portal_name)) {
+            send_error_response(sql_state::DUPLICATE_CURSOR, "Portal already exists: " + portal_name);
             return;
         }
 
@@ -277,7 +298,7 @@ namespace frontend::postgres {
                 send_error_response(sql_state::UNDEFINED_PARAMETER,
                                     "Missing parameters format codes in BIND to statement " + stmt + ": received " +
                                         std::to_string(format.size()) + " out of required " +
-                                        std::to_string(it->second.parameter_count));
+                                        std::to_string(it->second->parameter_count));
                 return;
             } else {
                 encoding = *encoding_opt;
@@ -299,7 +320,7 @@ namespace frontend::postgres {
                 return;
             }
 
-            const field_type type = it->second.specified_types[i];
+            const field_type type = it->second->specified_types[i];
             if (encoding == result_encoding::TEXT) {
                 std::string str(len, '\0');
                 for (int j = 0; j < len; str[j++] = static_cast<char>(reader.read_uint8()))
@@ -409,7 +430,7 @@ namespace frontend::postgres {
         }
 
         // add & create portal
-        portals_.erase(portal_name); // portals with identical name replace each other
+        portals_.erase(portal_name); // only the unnamed portal can already exist
         portals_.emplace(std::move(portal_name), portal_meta(std::move(params), it->second, std::move(out_format)));
 
         send_packet(build_bind_complete(writer_));
@@ -426,6 +447,10 @@ namespace frontend::postgres {
         }
 
         if (r.value().parameter_count != stmt.parameter_count) {
+            if (!release_statement(id)) {
+                send_error_response(sql_state::INTERNAL_ERROR, "Unable to release prepared statement", error_severity::fatal());
+                return false;
+            }
             send_error_response(sql_state::UNDEFINED_PARAMETER,
                                 "Prepared statement changed its parameter count on re-prepare: " +
                                     std::to_string(r.value().parameter_count) + " out of " +
@@ -440,7 +465,7 @@ namespace frontend::postgres {
 
     bool postgres_connection::run_portal(portal_meta& portal) {
         OTX_ZONE_N("pg::run_portal");
-        auto& stmt = portal.statement.get();
+        auto& stmt = *portal.statement;
         if (stmt.consumed && !reprepare_stmt(stmt)) {
             return false;
         }
@@ -471,7 +496,7 @@ namespace frontend::postgres {
         }
 
         auto& portal = it->second;
-        auto& stmt = portal.statement.get();
+        auto& stmt = *portal.statement;
         if (portal.result && sql_session_.status() == frontend::sql_session::state::failed) {
             send_error_response(sql_state::IN_FAILED_SQL_TRANSACTION, "Transaction is aborted");
             return;
@@ -579,29 +604,29 @@ namespace frontend::postgres {
     bool postgres_connection::do_close(frontend::postgres::describe_close_arg type, std::string name) {
         if (type == describe_close_arg::STATEMENT) {
             if (auto it = statement_name_map_.find(name); it != statement_name_map_.end()) {
-                for (auto portal = portals_.begin(); portal != portals_.end();) {
-                    if (&portal->second.statement.get() == &it->second) portal = portals_.erase(portal);
-                    else ++portal;
-                }
                 // The worker keeps an unexecuted statement until it is closed;
                 // an executed one it has already dropped (consumed).
-                if (!it->second.consumed) {
-                    // sending to the Scheduler event-loop always returns needs_sched=false
-                    [[maybe_unused]] auto [needs_sched, fut] =
-                        actor_zeta::send(scheduler_, &Scheduler::close_statement, it->second.stmt_session);
-                    auto r = otterstax::await_future_blocking<session_payload>(std::move(fut), resource_);
-                    if (r.has_error()) {
-                        log_->warn("[Connection {}] CLOSE stmt: \"{}\": close_statement failed: {}",
-                                   connection_id_,
-                                   name,
-                                   r.error().what);
-                        return false;
-                    }
+                if (!it->second->consumed) {
+                    if (!release_statement(it->second->stmt_session)) return false;
+                    // A bound portal can still execute this text. It must
+                    // obtain a fresh Worker entry, just as after an Execute.
+                    it->second->consumed = true;
                 }
                 statement_name_map_.erase(it);
             }
         } else {
             portals_.erase(std::move(name));
+        }
+        return true;
+    }
+
+    bool postgres_connection::release_statement(session_hash_t id) {
+        OTX_ZONE_N("pg::release_statement");
+        auto [needs_sched, future] = actor_zeta::send(scheduler_, &Scheduler::close_statement, id);
+        auto result = otterstax::await_future_blocking<session_payload>(std::move(future), resource_);
+        if (result.has_error()) {
+            log_->warn("[Connection {}] close_statement {} failed: {}", connection_id_, id, result.error().what);
+            return false;
         }
         return true;
     }
@@ -656,8 +681,8 @@ namespace frontend::postgres {
             }
             // A statement has no result formats yet (they come with Bind), so its
             // RowDescription is text; ParameterDescription always precedes it.
-            packets.emplace_back(build_parameter_description(writer_, it->second.specified_types));
-            if (!do_describe(it->second.schema, {result_encoding::TEXT}, packets, it->second.described)) {
+            packets.emplace_back(build_parameter_description(writer_, it->second->specified_types));
+            if (!do_describe(it->second->schema, {result_encoding::TEXT}, packets, it->second->described)) {
                 return;
             }
         } else {
@@ -684,12 +709,12 @@ namespace frontend::postgres {
             // than by executing anything; for one without it there are no
             // result columns and the answer is NoData.
             auto& portal = it->second;
-            if (portal.statement.get().tag != T_TransactionStmt &&
+            if (portal.statement->tag != T_TransactionStmt &&
                 sql_session_.status() == frontend::sql_session::state::failed) {
                 send_error_response(sql_state::IN_FAILED_SQL_TRANSACTION, "Transaction is aborted");
                 return;
             }
-            if (portal.statement.get().tag == T_SelectStmt) {
+            if (portal.statement->tag == T_SelectStmt) {
                 if (!portal.result && !run_portal(portal)) {
                     return;
                 }
@@ -702,7 +727,7 @@ namespace frontend::postgres {
                                  portal.described)) {
                     return;
                 }
-            } else if (!do_describe(portal.statement.get().schema, portal.format, packets, portal.described)) {
+            } else if (!do_describe(portal.statement->schema, portal.format, packets, portal.described)) {
                 return;
             }
         }
@@ -751,8 +776,8 @@ namespace frontend::postgres {
             log_->error("[Connection {}] Transaction cleanup failed: {}", connection_id_, rollback.error().what);
         }
         OTX_ZONE_N("pg::finish_impl");
-        // do_close releases an unexecuted statement on the Worker and forgets
-        // the statement with its portals; the loop drains the map through it.
+        // do_close releases unexecuted Worker entries. Portals hold only
+        // metadata or completed results after their statement is closed.
         while (!statement_name_map_.empty()) {
             if (!do_close(describe_close_arg::STATEMENT, statement_name_map_.begin()->first)) {
                 // The failed close was logged; avoid retrying indefinitely

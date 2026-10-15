@@ -35,6 +35,7 @@ set(${PROJECT_NAME}_SOURCES
     test_component_manager_lifecycle.cpp
     test_frontend_shutdown.cpp
     test_frontend_connection_lifetime.cpp
+    test_pg_prepared_lifecycle.cpp
     test_frontend_malformed_packet.cpp
     test_frontend_accept_retry.cpp
     test_spark_plan_execution.cpp

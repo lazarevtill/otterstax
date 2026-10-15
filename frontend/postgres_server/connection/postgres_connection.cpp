@@ -72,10 +72,10 @@ namespace frontend::postgres {
         , described(false) {}
 
     postgres_connection::portal_meta::portal_meta(portal_t params,
-                                                  prepared_stmt_meta& statement,
+                                                  std::shared_ptr<prepared_stmt_meta> statement,
                                                   std::vector<result_encoding> format)
         : params(std::move(params))
-        , statement(statement)
+        , statement(std::move(statement))
         , format(std::move(format))
         , described(false)
         , result()
