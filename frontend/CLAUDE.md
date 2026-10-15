@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+The actor await bridges use dedicated `actor_wait_timeout` and
+`actor_channel_closed` error codes from the pinned core recipe. A completed
+`io_error` or `transaction_inactive` is a query result, not a broken SQL session.
+Keep this distinction in both the native and gRPC wait paths.
+
 Native connections own `common/sql_session`, which retains the engine session
 across simple queries, prepared execution and schema probes. Transaction state
 drives PostgreSQL ReadyForQuery/CommandComplete and MySQL OK/EOF flags.

@@ -26,6 +26,9 @@ The source patches implement these engine corrections:
   tombstone after checking its transaction ownership. Its version stamps no
   longer pin checkpoint progress. Tail appends are truncated; later committed
   rows and active readers retain their visibility.
+- Actor wait deadlines and closed result channels have dedicated error codes,
+  appended without changing existing values. Completed storage or transaction
+  errors cannot be mistaken for lost requests by the frontends.
 
 Application regressions are in `tests/system/test_expression_subqueries.cpp`,
 `tests/system/test_kafka_offsets.cpp`, `tests/system/test_engine_rollback_checkpoint.cpp`

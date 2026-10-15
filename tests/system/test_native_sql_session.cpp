@@ -28,6 +28,27 @@ namespace {
         return std::make_unique<delayed_parser>(resource, aliases);
     }
 
+    class reported_error_parser final : public IParser {
+    public:
+        reported_error_parser(std::pmr::memory_resource* resource, const otterstax::names::alias_registry_t& aliases)
+            : resource_(resource), parser_(make_parser(resource, aliases)) {}
+        core::result_wrapper_t<ParsedQueryDataPtr> parse(const std::string& sql) override {
+            if (sql.find("/* reported io */") != std::string::npos)
+                return core::error_t{core::error_code_t::io_error, std::pmr::string{"reported storage failure", resource_}};
+            if (sql.find("/* reported transaction */") != std::string::npos)
+                return core::error_t{core::error_code_t::transaction_inactive, std::pmr::string{"reported inactive transaction", resource_}};
+            return parser_->parse(sql);
+        }
+    private:
+        std::pmr::memory_resource* resource_;
+        parser_ptr parser_;
+    };
+
+    parser_ptr make_reported_error_parser(std::pmr::memory_resource* resource,
+                                         const otterstax::names::alias_registry_t& aliases) {
+        return std::make_unique<reported_error_parser>(resource, aliases);
+    }
+
     struct fixture {
         otterstax::test::temporary_directory directory{"native-sql-session"};
         otterstax::test::scheduler_stack_owner owner{directory.path.string(), &make_parser};
@@ -48,6 +69,33 @@ namespace {
         }
         size_t rows(frontend::sql_session& session) { return run(session, "SELECT * FROM txn.items;").size(); }
     };
+}
+
+TEST_CASE("native SQL query errors cannot impersonate an expired or broken actor future", "[transactions]") {
+    otterstax::test::temporary_directory directory{"reported-query-errors"};
+    otterstax::test::scheduler_stack_owner owner(directory.path.string(), &make_reported_error_parser);
+    const auto stack = owner.stack();
+    for (bool mysql : {false, true}) {
+        frontend::sql_session session(stack.resource, stack.scheduler, mysql);
+        for (const auto* query : {"SELECT 1; /* reported io */", "SELECT 1; /* reported transaction */"}) {
+            auto failed = session.execute(next_request_id(), query);
+            REQUIRE(failed.has_error());
+            CHECK_FALSE(session.broken());
+            auto usable = session.execute(next_request_id(), "SELECT 42;");
+            REQUIRE_FALSE(usable.has_error());
+            CHECK(usable.value().size() == 1);
+
+            REQUIRE_FALSE(session.execute(next_request_id(), "BEGIN;").has_error());
+            failed = session.execute(next_request_id(), query);
+            REQUIRE(failed.has_error());
+            session.mark_failed(); // Native frontends call this when sending an execution error.
+            CHECK(session.status() == frontend::sql_session::state::failed);
+            CHECK_FALSE(session.broken());
+            REQUIRE_FALSE(session.execute(next_request_id(), "ROLLBACK;").has_error());
+            REQUIRE_FALSE(session.execute(next_request_id(), "SELECT 42;").has_error());
+        }
+        REQUIRE_FALSE(session.close().has_error());
+    }
 }
 
 TEST_CASE("native SQL sessions retain engine transactions across independent request IDs", "[transactions]") {

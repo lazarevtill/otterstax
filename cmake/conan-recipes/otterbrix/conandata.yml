@@ -13,3 +13,6 @@ patches:
     - patch_file: "patches/checkpoint-abort.patch"
       patch_description: "Retire aborted non-tail appends without pinning checkpoints or deleting concurrent rows"
       patch_type: "bugfix"
+    - patch_file: "patches/actor-wait-errors.patch"
+      patch_description: "Keep actor deadline and channel failures distinct from completed engine and storage errors"
+      patch_type: "bugfix"

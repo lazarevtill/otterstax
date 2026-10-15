@@ -56,7 +56,7 @@ class OtterStax(ConanFile):
         self.requires("zlib/1.3.1")
         self.requires("bzip2/1.0.8")
         # Export cmake/conan-recipes/otterbrix before installing dependencies.
-        self.requires("otterbrix/1.0.0b2-rc-3#a184367d721561d28990b4ae2c729d5c")
+        self.requires("otterbrix/1.0.0b2-rc-3#aab9f66f38b21dea259c8089339848b2")
         self.requires("magic_enum/0.8.1")
         self.requires("actor-zeta/1.2.0@")
         self.requires("libpq/15.4")
