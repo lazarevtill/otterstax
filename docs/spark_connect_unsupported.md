@@ -301,12 +301,12 @@ Rows reach PySpark as Arrow batches.
   `sameSemantics()`, `semanticHash()`, `cache()` / `persist()` / `unpersist()`,
   `storageLevel`, DDL parsing — get a placeholder answer, not a result; use
   `df.schema` in place of `printSchema()`.
-- **Interrupt** — accepted and ignored: a query runs to completion.
+- **Interrupt** — returns `UNIMPLEMENTED`; the server cannot interrupt a running query.
 - **ReattachExecute** — results are not buffered, so a result stream that broke
   cannot be resumed (`NOT_FOUND`, `INVALID_HANDLE.OPERATION_NOT_FOUND`).
   ReleaseExecute and ReleaseSession are acknowledged.
-- **Artifacts** — `AddArtifacts` / `ArtifactStatus` are acknowledged and nothing
-  is stored.
+- **Artifacts** — `AddArtifacts` / `ArtifactStatus` return `UNIMPLEMENTED`.
+  Uploads are refused immediately, without waiting for the client stream to end.
 - **FetchErrorDetails** — answers no details: an error carries its message only.
 - **Not implemented from 4.1 / 4.2** — the `CloneSession` and `GetStatus` RPCs
   (clients call them only through their explicit API); compressed plans

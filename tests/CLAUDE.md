@@ -263,6 +263,11 @@ python -m pytest tests/test_flightsql_client_mysql_backend.py -v
 
 ## Prepared statement and runtime configuration checks
 
+`test_spark_client_capabilities.py` runs through every PySpark client in the
+compatibility matrix. Unsupported interruption and artifact RPCs must return
+`UNIMPLEMENTED`, including an upload whose client stream remains open. A supported
+Config call on the same channel must still succeed after those refusals.
+
 `test_pg_prepared_lifecycle.cpp` drives the real PostgreSQL server over raw
 sockets: duplicate names, statement and portal close, unnamed replacement, and
 rejected preparation cleanup. Its tracking parser delegates to the real parser

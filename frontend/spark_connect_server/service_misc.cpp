@@ -32,7 +32,7 @@ namespace frontend::spark {
             OTX_ZONE_N("SparkConnectServiceImpl::handle_artifact_status");
             response.set_session_id(request.session_id());
         }
-        co_await rpc.finish(response, grpc::Status::OK);
+        co_await rpc.finish(response, {grpc::StatusCode::UNIMPLEMENTED, "Spark artifact storage is not supported"});
     }
 
     // ---------------------------------------------------------------------------
@@ -45,9 +45,8 @@ namespace frontend::spark {
         {
             OTX_ZONE_N("SparkConnectServiceImpl::handle_interrupt");
             response.set_session_id(request.session_id());
-            // interrupted_ids left empty.
         }
-        co_await rpc.finish(response, grpc::Status::OK);
+        co_await rpc.finish(response, {grpc::StatusCode::UNIMPLEMENTED, "Spark query interruption is not supported"});
     }
 
     // ---------------------------------------------------------------------------
@@ -98,24 +97,10 @@ namespace frontend::spark {
     // ---------------------------------------------------------------------------
     boost::asio::awaitable<void, agrpc::GrpcExecutor> SparkConnectServiceImpl::handle_add_artifacts(
         agrpc::ServerRPC<&sc::SparkConnectService::AsyncService::RequestAddArtifacts>& rpc) {
-        sc::AddArtifactsRequest chunk;
-        std::string sid;
-        while (co_await rpc.read(chunk)) {
-            if (sid.empty()) {
-                sid = chunk.session_id();
-            }
-        }
-
-        // The handler's own work starts only once the stream is drained (every
-        // statement before it is a read), so its zone covers the response and
-        // closes before the finish.
+        // Refuse immediately: reading an upload neither stores its artifacts nor
+        // provides a useful bound on how much data an unsupported RPC consumes.
         sc::AddArtifactsResponse response;
-        {
-            OTX_ZONE_N("SparkConnectServiceImpl::handle_add_artifacts");
-            response.set_session_id(sid);
-            // artifacts list left empty.
-        }
-        co_await rpc.finish(response, grpc::Status::OK);
+        co_await rpc.finish(response, {grpc::StatusCode::UNIMPLEMENTED, "Spark artifact storage is not supported"});
     }
 
 } // namespace frontend::spark
