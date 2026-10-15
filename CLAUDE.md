@@ -4,7 +4,9 @@ Native transaction semantics and current protocol limits are documented in
 [docs/transactions.md](docs/transactions.md). Keep engine execution context
 separate from process-unique request/prepared-statement IDs.
 PostgreSQL bound portals retain their statement metadata independently of the
-statement name. See `frontend/CLAUDE.md`.
+statement name. Spark runtime configuration exposes fixed values; mutations
+return an unsupported-operation error, or per-key warnings for an explicit
+best-effort SET. See `frontend/CLAUDE.md`.
 Client security is configured by `service.security`. Keycloak mode requires TLS
 and verifies bearer access tokens on every gRPC call and native command. An
 accepted identity has full access to its tenant instance. See [deployment](docs/deployment.md)
