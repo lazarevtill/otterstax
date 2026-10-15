@@ -4,6 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Role
 
+`KafkaManager` receives an immutable administrator destination policy. Empty
+policy denies all destinations, including in dry mode. CREATE validates every
+bootstrap entry before changing engine tables or persisted metadata; recovery
+and producer/consumer construction validate again. Both clients install the same
+resolver guard for advertised brokers. `kafka_destination_guard` owns callback
+context until the client and its internal threads have stopped; preserve that
+lifetime during moves and teardown. Test fixtures explicitly list their broker
+addresses. See `tests/system/test_kafka_destinations.cpp`.
+
 `integration/kafka/` is the Kafka **runtime**: the `KafkaManager` actor plus its
 implementation. It owns the live Kafka objects (SOURCE / STREAM), their backing
 Otterbrix tables, and the librdkafka consumer/producer threads. The Kafka DDL

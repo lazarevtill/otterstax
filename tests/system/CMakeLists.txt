@@ -15,6 +15,7 @@ set(${PROJECT_NAME}_SOURCES
     test_kafka_recovery_errors.cpp
     test_kafka_batch_loop.cpp
     test_kafka_delivery.cpp
+    test_kafka_destinations.cpp
     test_dml_result_shape.cpp
     test_row_producing_result_shape.cpp
     test_prepared_reexecute.cpp

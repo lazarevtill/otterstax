@@ -11,6 +11,11 @@ bundle. `endpoint` is a host/port, not a URL. Local HTTP fixtures opt in explici
 `access_key_env`, `secret_key_env` and `session_token_env` resolve populated
 environment variables at startup and cannot coexist with their inline fields.
 
+`service.security.kafka_brokers` is an exact host/port allowlist for both deployment
+modes. Empty or absent means no Kafka destination is permitted. Config parsing
+rejects malformed entries; producers and consumers enforce the policy for both
+bootstrap and advertised brokers. See `docs/deployment.md` for address syntax.
+
 `service.security` carries the explicit `trusted_private` or `keycloak` mode,
 TLS file references and Keycloak introspection limits. Parsing retains an
 unspecified mode when configuration omits it; executable startup rejects that

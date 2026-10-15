@@ -18,6 +18,9 @@ data directory. S3 endpoints default to verified HTTPS and support environment
 credential references. Deployment details live in `docs/deployment.md`.
 
 
+Outbound Kafka destinations require `service.security.kafka_brokers`, including
+advertised brokers. Both deployment modes enforce this policy.
+
 Engine storage and application logs use `--data-dir`, then `OTTERSTAX_DATA_DIR`,
 then `./data`. Docker images set `OTTERSTAX_DATA_DIR=/app/data`. Tenant instances
 must use separate storage and connector configuration. `--help` prints to stdout

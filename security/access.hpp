@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace otterstax::security {
 
@@ -33,6 +34,7 @@ namespace otterstax::security {
         std::string private_key_file;
         keycloak_config keycloak;
         file_access_config files;
+        std::vector<std::string> kafka_brokers;
     };
 
     enum class token_status { accepted, rejected, unavailable };

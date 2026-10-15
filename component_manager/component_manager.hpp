@@ -30,7 +30,8 @@
 class ComponentManager {
 public:
     ComponentManager(const configuration::config& config, const config::ConnectionsConfig& connections,
-                     std::shared_ptr<const otterstax::security::file_access> files = {});
+                     std::shared_ptr<const otterstax::security::file_access> files = {},
+                     std::vector<std::string> kafka_brokers = {});
     ~ComponentManager();
     std::pmr::memory_resource* getResource();
     actor_zeta::address_t scheduler_address() const;

@@ -35,7 +35,8 @@ namespace {
 } // namespace
 
 ComponentManager::ComponentManager(const configuration::config& config, const config::ConnectionsConfig& connections,
-                                   std::shared_ptr<const otterstax::security::file_access> files)
+                                   std::shared_ptr<const otterstax::security::file_access> files,
+                                   std::vector<std::string> kafka_brokers)
     : engine_(new db::otterbrix_engine_t(config))
     , resource_(engine_->dispatcher()->resource())
     , aliases_(make_alias_registry(connections)) {
@@ -54,7 +55,8 @@ ComponentManager::ComponentManager(const configuration::config& config, const co
 
         kafka_manager_ = actor_zeta::spawn<otterstax::kafka::KafkaManager>(resource_,
                                                                            engine_->engine_dispatcher_address(),
-                                                                           /*start_pollers=*/true);
+                                                                           /*start_pollers=*/true,
+                                                                           std::make_shared<const otterstax::security::network_destinations>(kafka_brokers));
         assert(kafka_manager_ != nullptr && "kafka manager must not be null");
 
         catalog_manager_ = actor_zeta::spawn<mysql::CatalogManager>(resource_, otterbrix_manager_->address(), aliases_);

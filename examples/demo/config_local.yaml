@@ -3,7 +3,7 @@
 #   ./build/server --config examples/demo/config_local.yaml
 
 service:
-  security: { mode: trusted_private }
+  security: { mode: trusted_private, kafka_brokers: ["127.0.0.1:19093"] }
   flight_sql:
     host: "0.0.0.0"
     port: 8815

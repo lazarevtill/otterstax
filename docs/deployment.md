@@ -150,6 +150,28 @@ inline field. The process resolves these references at startup. Authentication
 failures and TLS failures surface as operation errors; no plaintext fallback or
 certificate-verification bypass is available.
 
+## Kafka destinations
+
+Both deployment modes require every Kafka destination in
+`service.security.kafka_brokers`. Missing or empty lists deny Kafka connections.
+Entries are exact `hostname:port`, `IPv4:port` or `[IPv6]:port` values; wildcards,
+URL schemes, credentials and implicit ports are rejected at startup.
+
+```yaml
+service:
+  security:
+    mode: trusted_private
+    kafka_brokers: ["broker-a.example:9092", "broker-b.example:9092"]
+```
+
+SQL `BOOTSTRAP_SERVERS` must select only listed entries. Include every advertised
+broker, not just the bootstrap address: producers and consumers apply the same
+policy before resolving discovered brokers. A hostname authorizes its DNS
+resolution; use administrator-controlled DNS. Hostnames are case-insensitive,
+IPv6 spelling is normalized, and ports are numeric. IP literals and DNS aliases
+need separate entries. Persisted objects are revalidated on startup; removing a
+destination still referenced by an object prevents successful recovery.
+
 `tests/test_client_security.py` exercises the actual server protocols against an
 HTTPS introspection fixture. `tests/test_keycloak_live.py` owns a separate local
 Keycloak container for live signature, audience and expiry checks. Both generate

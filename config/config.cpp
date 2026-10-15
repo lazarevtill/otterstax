@@ -5,6 +5,7 @@
 #include "config.hpp"
 #include "connections/connection_config_reader.hpp"
 #include "yaml_scalar.hpp"
+#include "security/network_destinations.hpp"
 
 #include "utility/tracy_profiler.hpp"
 
@@ -120,6 +121,17 @@ namespace {
                 if (value.has_error()) return value.convert_error<access_config>();
                 if (value.value() <= 0) return invalid_field("service.security.files.max_file_bytes", "must be positive", resource);
                 result.files.max_file_bytes = value.value();
+            }
+        }
+        if (const auto brokers = node["kafka_brokers"]) {
+            constexpr auto field = "service.security.kafka_brokers";
+            if (!brokers.IsSequence()) return invalid_field(field, "must be a sequence of exact host:port destinations", resource);
+            for (const auto& broker : brokers) {
+                auto value = yaml_scalar<std::string>(broker, field, resource);
+                if (value.has_error()) return value.convert_error<access_config>();
+                auto canonical = canonical_destination(value.value());
+                if (!canonical) return invalid_field(field, "requires hostname:port or [IPv6]:port without wildcards or URL syntax", resource);
+                result.kafka_brokers.push_back(std::move(*canonical));
             }
         }
         if (result.certificate_file.empty() != result.private_key_file.empty()) {

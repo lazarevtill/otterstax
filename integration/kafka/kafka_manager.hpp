@@ -5,6 +5,7 @@
 
 #include "otterbrix/parser/grammar_extension/kafka/kafka_node.hpp"
 #include "utility/session.hpp"
+#include "security/network_destinations.hpp"
 
 #include <actor-zeta.hpp>
 #include <components/cursor/cursor.hpp>
@@ -49,7 +50,8 @@ namespace otterstax::kafka {
         // component_manager turns it on
         KafkaManager(std::pmr::memory_resource* resource,
                      actor_zeta::address_t engine_dispatcher_address,
-                     bool start_pollers = false);
+                     bool start_pollers = false,
+                     std::shared_ptr<const security::network_destinations> destinations = {});
         ~KafkaManager();
 
         std::pmr::memory_resource* resource() const noexcept { return resource_; }
@@ -180,6 +182,7 @@ namespace otterstax::kafka {
         actor_zeta::address_t dispatcher_address_;
         log_t log_;
         bool start_pollers_;
+        std::shared_ptr<const security::network_destinations> destinations_;
         bool database_ensured_{false};
         bool sources_table_ensured_{false}; // kafka.__sources created this process
         std::unordered_map<std::string, kafka_object_t> registry_;

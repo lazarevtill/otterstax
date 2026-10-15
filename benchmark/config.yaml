@@ -5,7 +5,7 @@
 # and benchmarks/queries.py.
 
 service:
-  security: { mode: trusted_private }
+  security: { mode: trusted_private, kafka_brokers: ["bench_kafka:9092"] }
   flight_sql:
     host: "0.0.0.0"
     port: 8815

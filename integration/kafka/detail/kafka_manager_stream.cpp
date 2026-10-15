@@ -316,7 +316,7 @@ namespace otterstax::kafka {
             // Kafka transaction (a crash before commit aborts it — a read-committed
             // consumer never sees a partial INSERT). Stable txn id per object for
             // producer fencing. init_transactions() needs a reachable broker
-            auto created = kafka_producer_t::create({bootstrap_servers, topic, "otterstax_insert_" + name});
+            auto created = kafka_producer_t::create({bootstrap_servers, topic, "otterstax_insert_" + name, destinations_});
             if (created.has_error()) {
                 return created.error();
             }

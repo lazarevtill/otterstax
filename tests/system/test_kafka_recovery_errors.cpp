@@ -7,6 +7,7 @@
 #include "drive_future.hpp"
 #include "integration/kafka/detail/kafka_reader.hpp"
 #include "integration/kafka/kafka_manager.hpp"
+#include "../mock/kafka_destinations.hpp"
 #include "integration/otterbrix/otterbrix_engine.hpp"
 #include "otterbrix/config.hpp"
 #include "otterbrix/parser/parser.hpp"
@@ -63,7 +64,7 @@ TEST_CASE("kafka CREATE failure cannot remove a preexisting offsets relation") {
     query("CREATE DATABASE kafka;");
     query("CREATE TABLE kafka.recovery_src__offsets (owned_value INT);");
     query("INSERT INTO kafka.recovery_src__offsets (owned_value) VALUES (42);");
-    auto manager = actor_zeta::spawn<KafkaManager>(resource, address, false);
+    auto manager = actor_zeta::spawn<KafkaManager>(resource, address, false, fixture_kafka_destinations());
     REQUIRE(create_source(*manager, resource)->is_error());
     auto preserved = query("SELECT owned_value FROM kafka.recovery_src__offsets;");
     REQUIRE(preserved->size() == 1);
@@ -79,7 +80,7 @@ TEST_CASE("kafka DDL rejects duplicate names and mismatched DROP kinds without l
     auto engine = db::make_otterbrix_engine(make_create_config(directory.path));
     auto* resource = engine->dispatcher()->resource();
     const auto address = engine->engine_dispatcher_address();
-    auto manager = actor_zeta::spawn<KafkaManager>(resource, address, false);
+    auto manager = actor_zeta::spawn<KafkaManager>(resource, address, false, fixture_kafka_destinations());
     REQUIRE_FALSE(create_source(*manager, resource)->is_error());
     const std::string stream = "CREATE STREAM recovery_stream WITH (KAFKA_TOPIC='output', "
         "BOOTSTRAP_SERVERS='127.0.0.1:9092') AS SELECT id FROM kafka.recovery_src;";
@@ -101,9 +102,9 @@ TEST_CASE("kafka recovery: an absent registry succeeds but a corrupt registry fa
     auto engine = db::make_otterbrix_engine(make_create_config(directory.path));
     auto* resource = engine->dispatcher()->resource();
     const auto address = engine->engine_dispatcher_address();
-    auto recovering = actor_zeta::spawn<KafkaManager>(resource, address, true);
+    auto recovering = actor_zeta::spawn<KafkaManager>(resource, address, true, fixture_kafka_destinations());
     REQUIRE_FALSE(recovering->recover().contains_error());
-    auto creator = actor_zeta::spawn<KafkaManager>(resource, address, false);
+    auto creator = actor_zeta::spawn<KafkaManager>(resource, address, false, fixture_kafka_destinations());
     REQUIRE_FALSE(create_source(*creator, resource)->is_error());
     const auto corrupt = GENERATE(
         "UPDATE kafka.__sources SET transactional = 'invalid';",
@@ -124,7 +125,7 @@ TEST_CASE("kafka DROP SOURCE cannot remove ordinary tables absent from its regis
     auto engine = db::make_otterbrix_engine(make_create_config(directory.path));
     auto* resource = engine->dispatcher()->resource();
     const auto address = engine->engine_dispatcher_address();
-    auto manager = actor_zeta::spawn<KafkaManager>(resource, address, false);
+    auto manager = actor_zeta::spawn<KafkaManager>(resource, address, false, fixture_kafka_destinations());
     const auto query = [&](const std::string& sql) {
         auto result = drive_until_ready(kd::kafka_query(address, resource, sql));
         REQUIRE(result);
@@ -150,12 +151,12 @@ TEST_CASE("kafka recovery: a missing transactional checkpoint is an error") {
     auto engine = db::make_otterbrix_engine(make_create_config(directory.path));
     auto* resource = engine->dispatcher()->resource();
     const auto address = engine->engine_dispatcher_address();
-    auto creator = actor_zeta::spawn<KafkaManager>(resource, address, false);
+    auto creator = actor_zeta::spawn<KafkaManager>(resource, address, false, fixture_kafka_destinations());
     REQUIRE_FALSE(create_source(*creator, resource)->is_error());
     auto dropped = drive_until_ready(kd::kafka_query(address, resource, "DROP TABLE kafka.recovery_src__offsets;"));
     REQUIRE(dropped);
     REQUIRE_FALSE(dropped->is_error());
-    auto recovering = actor_zeta::spawn<KafkaManager>(resource, address, true);
+    auto recovering = actor_zeta::spawn<KafkaManager>(resource, address, true, fixture_kafka_destinations());
     const auto recovered = recovering->recover();
     INFO(recovered.what);
     REQUIRE(recovered.contains_error());
@@ -168,7 +169,7 @@ TEST_CASE("kafka CREATE: consumer startup failure reaches the caller and cleans 
     auto engine = db::make_otterbrix_engine(make_create_config(directory.path));
     auto* resource = engine->dispatcher()->resource();
     const auto address = engine->engine_dispatcher_address();
-    auto manager = actor_zeta::spawn<KafkaManager>(resource, address, true);
+    auto manager = actor_zeta::spawn<KafkaManager>(resource, address, true, fixture_kafka_destinations());
     auto created = create_source(*manager, resource, "invalid-offset-policy");
     REQUIRE(created->is_error());
     CHECK(std::string{created->get_error().what}.find("auto.offset.reset") != std::string::npos);

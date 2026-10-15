@@ -363,7 +363,7 @@ namespace otterstax::kafka {
                               topic->second,
                               gid != opts.end() ? gid->second : ("otterstax_" + name),
                               ores != opts.end() ? ores->second : "earliest",
-                              std::move(committed_offsets)};
+                              std::move(committed_offsets), destinations_};
         auto consumer = kafka_consumer_t::create(std::move(cfg));
         if (consumer.has_error()) {
             return failure(consumer.error().type, consumer.error().what.c_str());
@@ -439,11 +439,11 @@ namespace otterstax::kafka {
         }
 
         auto consumer =
-            kafka_consumer_t::create({src_bootstrap->second, src_topic->second, group_id, offset_reset, {}});
+            kafka_consumer_t::create({src_bootstrap->second, src_topic->second, group_id, offset_reset, {}, destinations_});
         if (consumer.has_error()) {
             return start_failed(std::string{"consumer failed: "} + consumer.error().what.c_str());
         }
-        auto producer = kafka_producer_t::create({out_bootstrap->second, out_topic->second, transactional_id});
+        auto producer = kafka_producer_t::create({out_bootstrap->second, out_topic->second, transactional_id, destinations_});
         if (producer.has_error()) {
             return start_failed(std::string{"producer failed: "} + producer.error().what.c_str());
         }

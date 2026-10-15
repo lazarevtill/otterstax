@@ -115,7 +115,7 @@ int main(int argc, char* argv[]) {
 
     // Create component manager
     OTX_MESSAGE_L("startup: creating component manager");
-    ComponentManager cmanager(make_create_config(data_dir), server_config.connections, files);
+    ComponentManager cmanager(make_create_config(data_dir), server_config.connections, files, server_config.security.kafka_brokers);
 
     if (auto recovered = cmanager.recover(); recovered.contains_error()) {
         log->error("Cannot recover persisted Kafka objects: {}", recovered.what.c_str());

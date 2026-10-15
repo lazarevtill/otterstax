@@ -3,6 +3,7 @@
 
 #include "kafka_producer.hpp"
 #include "kafka_const.hpp"
+#include "kafka_destination_guard.hpp"
 #include "utility/tracy_profiler.hpp"
 
 #include <librdkafka/rdkafkacpp.h>
@@ -43,6 +44,10 @@ namespace otterstax::kafka::detail {
     };
 
     core::result_wrapper_t<kafka_producer_t> kafka_producer_t::create(producer_config_t config) {
+        if (!config.destinations || !config.destinations->allows_list(config.bootstrap_servers)) {
+            return producer_error("bootstrap destinations are not allowed by service.security.kafka_brokers");
+        }
+        auto destinations = std::make_unique<kafka_destination_guard>(std::move(config.destinations));
         const bool transactional = !config.transactional_id.empty();
         std::unique_ptr<RdKafka::Conf> conf(RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL));
         if (!conf) {
@@ -60,6 +65,7 @@ namespace otterstax::kafka::detail {
         }
 
         auto delivery_report = std::make_unique<delivery_report_t>();
+        if (!destinations->install(conf->c_ptr_global())) return producer_error("cannot install destination policy");
         if (conf->set("dr_cb", delivery_report.get(), errstr) != RdKafka::Conf::CONF_OK) {
             return producer_error("delivery callback: " + errstr);
         }
@@ -67,6 +73,7 @@ namespace otterstax::kafka::detail {
         if (!producer) {
             return producer_error("create failed: " + errstr);
         }
+        if (!destinations->attached()) return producer_error("cannot bind destination policy");
         if (transactional) {
             // A retriable init_transactions failure means the operation is still
             // running broker-side ("retry call to resume") — a single shot that loses
@@ -85,14 +92,16 @@ namespace otterstax::kafka::detail {
                 return init.error;
             }
         }
-        return kafka_producer_t(std::move(delivery_report), std::move(producer), std::move(config.topic), transactional);
+        return kafka_producer_t(std::move(destinations), std::move(delivery_report), std::move(producer), std::move(config.topic), transactional);
     }
 
-    kafka_producer_t::kafka_producer_t(std::unique_ptr<delivery_report_t> delivery_report,
+    kafka_producer_t::kafka_producer_t(std::unique_ptr<kafka_destination_guard> destinations,
+                                       std::unique_ptr<delivery_report_t> delivery_report,
                                        std::unique_ptr<RdKafka::Producer> producer,
                                        std::string topic,
                                        bool transactional) noexcept
-        : delivery_report_(std::move(delivery_report))
+        : destinations_(std::move(destinations))
+        , delivery_report_(std::move(delivery_report))
         , producer_(std::move(producer))
         , topic_(std::move(topic))
         , transactional_(transactional) {}
@@ -103,6 +112,7 @@ namespace otterstax::kafka::detail {
             if (producer_) producer_->flush(to_ms(PRODUCER_DRAIN_TIMEOUT));
             // flush/destruction may invoke the old callback.
             producer_.reset();
+            destinations_ = std::move(other.destinations_);
             delivery_report_ = std::move(other.delivery_report_);
             producer_ = std::move(other.producer_);
             topic_ = std::move(other.topic_);

@@ -37,3 +37,11 @@ The executable constructs the SQL policy before the engine. ComponentManager
 gives S3 a separate file actor restricted to private tenant staging. Do not pass
 the S3 actor's file permissions to SQL or add a client-controlled bypass flag.
 File limits bound encoded file bytes, not total query or decompression memory.
+
+`network_destinations` matches exact canonical host/port entries, denies empty
+lists and refuses wildcard, URL and ambiguous numeric-address syntax. Kafka
+uses this policy for SQL bootstrap lists and every resolver call, including
+advertised brokers. The librdkafka C++ API owns its opaque pointer; the C
+thread-start interceptor installs each handle's policy in its private thread
+context before DNS resolution. Never overwrite the library's opaque pointer or
+permit a resolver call without its policy.

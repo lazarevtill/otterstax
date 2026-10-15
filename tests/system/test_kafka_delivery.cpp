@@ -27,7 +27,9 @@ namespace {
 
         kd::kafka_producer_t producer(const std::string& transactional_id = {}) {
             auto result = kd::kafka_producer_t::create(
-                {rd_kafka_mock_cluster_bootstraps(cluster.get()), "delivery", transactional_id});
+                {rd_kafka_mock_cluster_bootstraps(cluster.get()), "delivery", transactional_id,
+                 std::make_shared<const otterstax::security::network_destinations>(
+                     std::vector<std::string>{rd_kafka_mock_cluster_bootstraps(cluster.get())})});
             REQUIRE_FALSE(result.has_error());
             return std::move(result.value());
         }

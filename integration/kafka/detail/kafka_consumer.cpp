@@ -3,6 +3,7 @@
 
 #include "kafka_consumer.hpp"
 #include "kafka_const.hpp"
+#include "kafka_destination_guard.hpp"
 #include "kafka_producer.hpp"
 #include "utility/tracy_profiler.hpp"
 
@@ -44,6 +45,10 @@ namespace otterstax::kafka::detail {
     };
 
     core::result_wrapper_t<kafka_consumer_t> kafka_consumer_t::create(consumer_config_t config) {
+        if (!config.destinations || !config.destinations->allows_list(config.bootstrap_servers)) {
+            return consumer_error("bootstrap destinations are not allowed by service.security.kafka_brokers");
+        }
+        auto destinations = std::make_unique<kafka_destination_guard>(std::move(config.destinations));
         auto rebalance_cb = std::make_unique<offset_rebalance_cb>();
         rebalance_cb->committed_offsets = std::move(config.committed_offsets);
 
@@ -67,20 +72,24 @@ namespace otterstax::kafka::detail {
             return consumer_error("set rebalance_cb: " + errstr);
         }
 
+        if (!destinations->install(conf->c_ptr_global())) return consumer_error("cannot install destination policy");
         std::unique_ptr<RdKafka::KafkaConsumer> consumer(RdKafka::KafkaConsumer::create(conf.get(), errstr));
         if (!consumer) {
             return consumer_error("create failed: " + errstr);
         }
+        if (!destinations->attached()) return consumer_error("cannot bind destination policy");
         if (auto err = consumer->subscribe({config.topic}); err != RdKafka::ERR_NO_ERROR) {
             return consumer_error("subscribe to '" + config.topic + "' failed: " + RdKafka::err2str(err));
         }
-        return kafka_consumer_t(std::move(rebalance_cb), std::move(consumer), std::move(config.topic));
+        return kafka_consumer_t(std::move(destinations), std::move(rebalance_cb), std::move(consumer), std::move(config.topic));
     }
 
-    kafka_consumer_t::kafka_consumer_t(std::unique_ptr<offset_rebalance_cb> rebalance_cb,
+    kafka_consumer_t::kafka_consumer_t(std::unique_ptr<kafka_destination_guard> destinations,
+                                       std::unique_ptr<offset_rebalance_cb> rebalance_cb,
                                        std::unique_ptr<RdKafka::KafkaConsumer> consumer,
                                        std::string topic) noexcept
-        : rebalance_cb_(std::move(rebalance_cb))
+        : destinations_(std::move(destinations))
+        , rebalance_cb_(std::move(rebalance_cb))
         , consumer_(std::move(consumer))
         , topic_(std::move(topic)) {}
 
@@ -93,6 +102,7 @@ namespace otterstax::kafka::detail {
             // close() can invoke the old callback; destroy the old consumer
             // before replacing its callback owner.
             consumer_.reset();
+            destinations_ = std::move(other.destinations_);
             rebalance_cb_ = std::move(other.rebalance_cb_);
             consumer_ = std::move(other.consumer_);
             topic_ = std::move(other.topic_);

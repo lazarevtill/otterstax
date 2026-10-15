@@ -18,6 +18,7 @@
 #include "integration/kafka/detail/kafka_poller.hpp"
 #include "integration/kafka/detail/kafka_reader.hpp"
 #include "integration/kafka/kafka_manager.hpp"
+#include "../mock/kafka_destinations.hpp"
 #include "integration/otterbrix/otterbrix_engine.hpp"
 #include "otterbrix/config.hpp"
 #include "otterbrix/operators/execute_plan.hpp"
@@ -73,7 +74,7 @@ TEST_CASE("kafka dry: CREATE/DROP SOURCE materialises tables, STREAM does not") 
     auto* resource = engine->dispatcher()->resource();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     // Probe a table's schema via a plain SELECT: a LIMIT plan (even LIMIT 1)
     // short-circuits over an empty table and returns a bare cursor (no
@@ -139,7 +140,7 @@ TEST_CASE("kafka dry: CREATE/DROP SOURCE materialises tables, STREAM does not") 
     // CREATE STREAM: registered only — no backing table (its state table is
     // designed with the streaming runtime later)
     auto stream = parse_kafka(parser,
-                              "CREATE STREAM st WITH (KAFKA_TOPIC='ot', VALUE_FORMAT='JSON') "
+                              "CREATE STREAM st WITH (KAFKA_TOPIC='ot', VALUE_FORMAT='JSON', BOOTSTRAP_SERVERS='localhost:9092') "
                               "AS SELECT * FROM kafka.s;");
     REQUIRE(stream);
     REQUIRE(stream->op() == kafka_op::create_stream);
@@ -187,7 +188,7 @@ TEST_CASE("kafka insert-query: INSERT INTO stream SELECT registers + persists, D
     auto* resource = engine->dispatcher()->resource();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     auto run_kafka = [&](kafka_node_ptr node) {
         auto [_, fut] =
@@ -287,7 +288,7 @@ TEST_CASE("kafka ingest: a json batch is inserted into the source table") {
     auto* resource = engine->dispatcher()->resource();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     auto src = parse_kafka(parser,
                            "CREATE SOURCE s (id INT, name VARCHAR) "
@@ -330,7 +331,7 @@ TEST_CASE("kafka offsets: write_offsets / parse_offsets roundtrip with max-per-p
     auto* resource = engine->dispatcher()->resource();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     auto src = parse_kafka(parser,
                            "CREATE SOURCE s (id INT, name VARCHAR) "
@@ -390,7 +391,7 @@ TEST_CASE("kafka poller: CREATE SOURCE starts a poller, DROP/teardown join clean
 
     GreenplumParser parser(resource, no_aliases());
     auto kafka_mgr =
-        actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), /*start_pollers=*/true);
+        actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), /*start_pollers=*/true, fixture_kafka_destinations());
 
     auto run_kafka = [&](kafka_node_ptr node) {
         auto [_, fut] =
@@ -442,7 +443,7 @@ TEST_CASE("kafka stream node-swap: aggregate(empty)+raw_data applies the SELECT"
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     // Create kafka.s so `SELECT ... FROM kafka.s` resolves at parse time
     {
@@ -551,7 +552,7 @@ TEST_CASE("kafka stream node-swap: the ORDER BY / LIMIT / HAVING tail is re-home
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     // kafka.s has to exist for `FROM kafka.s` to resolve at parse time
     {
@@ -676,7 +677,7 @@ TEST_CASE("kafka txn: BEGIN/INSERT/INSERT/COMMIT on one session is atomic; ROLLB
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     // CREATE SOURCE s -> kafka.s (id, name) + kafka.s__offsets (partition_id, committed_offset)
     {
@@ -746,7 +747,7 @@ TEST_CASE("kafka eos: node-based insert+offsets on one session are atomic; ROLLB
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
 
     auto src = parse_kafka(parser,
                            "CREATE SOURCE s (id INT, name VARCHAR) "
@@ -875,7 +876,7 @@ TEST_CASE("kafka produce: a schema-mismatched INSERT is rejected, nothing produc
     auto* resource = engine->dispatcher()->resource();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     // CREATE SOURCE s (id INT, name VARCHAR) -> registry carries the declared columns
     {
@@ -931,7 +932,7 @@ TEST_CASE("kafka stream write: SELECT output schema is derived; INSERT routes to
     auto* resource = engine->dispatcher()->resource();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address());
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, engine->engine_dispatcher_address(), false, fixture_kafka_destinations());
 
     auto run = [&](kafka_node_ptr node) {
         REQUIRE(node);
@@ -1011,7 +1012,7 @@ TEST_CASE("kafka stream: a COUNT column is declared and produced as the type the
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
     {
         auto src = parse_kafka(
             parser,
@@ -1191,7 +1192,7 @@ TEST_CASE("kafka offsets: parse_offsets spans a result of more than 1024 rows") 
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
     {
         auto src = parse_kafka(parser,
                                "CREATE SOURCE s (id INT, name VARCHAR) "
@@ -1245,7 +1246,7 @@ TEST_CASE("kafka create: an invalid TRANSACTIONAL option is rejected before any 
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
 
     auto run_kafka = [&](kafka_node_ptr node) {
         REQUIRE(node);
@@ -1329,7 +1330,7 @@ TEST_CASE("kafka create: a failed __sources write fails CREATE SOURCE and rolls 
         drive_until_ready(kd::kafka_query(addr, resource, "CREATE TABLE kafka.__sources (x INT);"))->is_error());
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
     auto probe = [&](const std::string& qualified) {
         return drive_until_ready(kd::kafka_query(addr, resource, "SELECT * FROM " + qualified + ";"));
     };
@@ -1373,7 +1374,7 @@ TEST_CASE("kafka drop: DROP SOURCE removes the offsets table; a missing source e
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
 
     auto run_kafka = [&](kafka_node_ptr node) {
         REQUIRE(node);
@@ -1437,7 +1438,7 @@ TEST_CASE("kafka poller: an at-least-once batch whose insert fails reports the e
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
     auto src = parse_kafka(parser,
                            "CREATE SOURCE s (id INT, name VARCHAR) "
                            "WITH (KAFKA_TOPIC='t', BOOTSTRAP_SERVERS='localhost:9092');");
@@ -1481,7 +1482,7 @@ TEST_CASE("kafka poller: a failed exactly-once batch is rolled back and the sess
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
     auto src = parse_kafka(parser,
                            "CREATE SOURCE s (id INT, name VARCHAR) "
                            "WITH (KAFKA_TOPIC='t', BOOTSTRAP_SERVERS='localhost:9092', TRANSACTIONAL='true');");
@@ -1568,7 +1569,7 @@ TEST_CASE("kafka recover: __sources rows past the first chunk are replayed, a mi
 
     GreenplumParser parser(resource, no_aliases());
     // The registry in this process: creates the objects and persists their rows
-    auto creator = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto creator = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
     auto create_source = [&](const std::string& name) {
         auto node = parse_kafka(parser,
                                 "CREATE SOURCE " + name +
@@ -1624,7 +1625,7 @@ TEST_CASE("kafka recover: __sources rows past the first chunk are replayed, a mi
     }
 
     // A restarted manager: nothing in its registry until recover() replays __sources
-    auto restarted = actor_zeta::spawn<KafkaManager>(resource, addr, /*start_pollers=*/true);
+    auto restarted = actor_zeta::spawn<KafkaManager>(resource, addr, /*start_pollers=*/true, fixture_kafka_destinations());
     auto produce_mismatch = [&](const std::string& name) {
         std::vector<otterstax::kafka::kafka_column_t> partial{
             {"id", ty::complex_logical_type(ty::logical_type::INTEGER)}};
@@ -1675,7 +1676,7 @@ TEST_CASE("kafka recover: a source's columns are read from the catalog, for an e
 
     // The registry of the previous process: two sources of one shape, one left
     // empty and one filled, so the recovered schema cannot come from row data
-    auto creator = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto creator = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
     REQUIRE_FALSE(run_kafka(creator, "CREATE SOURCE empty_src (id INT, name VARCHAR, w DOUBLE)" + with)->is_error());
     auto full = parse_kafka(parser, "CREATE SOURCE full_src (id INT, name VARCHAR, w DOUBLE)" + with);
     REQUIRE(full);
@@ -1709,7 +1710,7 @@ TEST_CASE("kafka recover: a source's columns are read from the catalog, for an e
     REQUIRE(count("full_src") == 3);
 
     // A restarted manager knows neither source until recover() replays __sources
-    auto restarted = actor_zeta::spawn<KafkaManager>(resource, addr, /*start_pollers=*/true);
+    auto restarted = actor_zeta::spawn<KafkaManager>(resource, addr, /*start_pollers=*/true, fixture_kafka_destinations());
     auto produce_error = [&](const std::string& name) {
         std::vector<otterstax::kafka::kafka_column_t> partial{
             {"id", ty::complex_logical_type(ty::logical_type::INTEGER)}};
@@ -1784,7 +1785,7 @@ TEST_CASE("kafka drop: DROP SOURCE with a dependent VIEW") {
     auto addr = engine->engine_dispatcher_address();
 
     GreenplumParser parser(resource, no_aliases());
-    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr);
+    auto kafka_mgr = actor_zeta::spawn<KafkaManager>(resource, addr, false, fixture_kafka_destinations());
 
     auto run_kafka = [&](kafka_node_ptr node) {
         REQUIRE(node);

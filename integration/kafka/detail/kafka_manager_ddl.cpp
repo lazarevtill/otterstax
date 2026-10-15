@@ -147,6 +147,10 @@ namespace otterstax::kafka {
         log_->debug("execute id {}: kafka op {} name {}", id, static_cast<int32_t>(node->op()), node->name());
         const auto existing = registry_.find(node->name());
         const bool creating = node->op() == kafka_op::create_source || node->op() == kafka_op::create_stream;
+        if (creating && !destinations_->allows_list(node->option("BOOTSTRAP_SERVERS").value_or(""))) {
+            co_return error_cursor(resource_, core::error_code_t::invalid_parameter,
+                                   "kafka: bootstrap destinations are not allowed by service.security.kafka_brokers");
+        }
         if (creating && existing != registry_.end()) {
             co_return error_cursor(resource_, core::error_code_t::already_exists,
                                    "kafka: object '" + node->name() + "' already exists");

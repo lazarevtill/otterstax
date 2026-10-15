@@ -35,7 +35,7 @@ service:
     delay_ms: 2000
 
 # Remote backends + s3 aliases. All sections are optional. `port` is a string;
-# postgresql `schema` defaults to "public"; s3 region/session_token/endpoint are
+# postgresql `schema` defaults to "public"; s3 endpoint is required; region/session_token are
 # optional. The `alias` is the outermost qualifier in federated SQL
 # (alias.db.schema.table) and the s3_alias used by CREATE EXTERNAL TABLE / COPY.
 connections:

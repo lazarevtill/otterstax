@@ -255,3 +255,11 @@ and observes retained plan references to detect Worker leaks.
 `test_runtime_config.cpp` checks rejected Spark configuration mutations,
 effective values, missing options, defaults, prefix filtering and modifiability.
 Best-effort SET must warn for each unapplied key without echoing its value.
+
+## Outbound destination checks
+
+`test_network_destinations.cpp` covers configuration parsing and ambiguous address
+forms. `test_kafka_destinations.cpp` uses a real two-broker mock cluster to verify
+that an unlisted advertised broker receives no request, while an explicitly
+allowed broker receives the produce. It also checks CREATE side effects and
+recovery after an administrator removes a destination.

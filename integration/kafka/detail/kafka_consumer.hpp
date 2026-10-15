@@ -34,6 +34,7 @@ namespace otterstax::kafka::detail {
         std::string offset_reset;
         // partition -> next offset to read on assign; empty map = broker-group resume
         std::map<int32_t, int64_t> committed_offsets;
+        std::shared_ptr<const security::network_destinations> destinations;
     };
 
     // RAII consumer over a single topic. Built via create(), which surfaces
@@ -74,12 +75,14 @@ namespace otterstax::kafka::detail {
         [[nodiscard]] core::error_t seek_to_batch_start(const std::vector<kafka_record_t>& batch);
 
     private:
-        kafka_consumer_t(std::unique_ptr<offset_rebalance_cb> rebalance_cb,
+        kafka_consumer_t(std::unique_ptr<kafka_destination_guard> destinations,
+                         std::unique_ptr<offset_rebalance_cb> rebalance_cb,
                          std::unique_ptr<RdKafka::KafkaConsumer> consumer,
                          std::string topic) noexcept;
 
         // rebalance_cb_ before consumer_: librdkafka holds the cb pointer for the
         // consumer's lifetime (incl. close()), so it must be destroyed after it
+        std::unique_ptr<kafka_destination_guard> destinations_;
         std::unique_ptr<offset_rebalance_cb> rebalance_cb_;
         std::unique_ptr<RdKafka::KafkaConsumer> consumer_;
         std::string topic_;
