@@ -10,3 +10,6 @@ patches:
     - patch_file: "patches/production-correctness.patch"
       patch_description: "Preserve transaction undo, type EXISTS placeholders, bind positional INSERT and initialize durable table roots"
       patch_type: "bugfix"
+    - patch_file: "patches/checkpoint-abort.patch"
+      patch_description: "Retire aborted non-tail appends without pinning checkpoints or deleting concurrent rows"
+      patch_type: "bugfix"

@@ -44,6 +44,8 @@ set(${PROJECT_NAME}_SOURCES
     test_constant_aggregates.cpp
     test_expression_subqueries.cpp
     test_engine_transactions.cpp
+    test_engine_rollback_checkpoint.cpp
+    test_engine_abort_versions.cpp
     test_native_sql_session.cpp
 )
 

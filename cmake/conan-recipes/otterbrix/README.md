@@ -13,7 +13,7 @@ conan export cmake/conan-recipes/otterbrix
 conan install . --build=missing -s build_type=Release
 ```
 
-The source patches implement four engine corrections:
+The source patches implement these engine corrections:
 
 - Positional `INSERT ... VALUES` columns have distinct binding names while the
   catalog binds their positions to the table's actual columns.
@@ -22,7 +22,13 @@ The source patches implement four engine corrections:
   operator before discarding transaction state.
 - New table storage writes a durable empty checkpoint before write-through can
   extend its file. Recovery keeps its corruption checks.
+- A rolled-back append preceding another transaction's rows becomes an invisible
+  tombstone after checking its transaction ownership. Its version stamps no
+  longer pin checkpoint progress. Tail appends are truncated; later committed
+  rows and active readers retain their visibility.
 
-Application regressions are in `tests/system/test_expression_subqueries.cpp`
-and `tests/system/test_kafka_offsets.cpp`. The broker-backed durability check is
-`tests/test_kafka_crash_recovery.py`.
+Application regressions are in `tests/system/test_expression_subqueries.cpp`,
+`tests/system/test_kafka_offsets.cpp`, `tests/system/test_engine_rollback_checkpoint.cpp`
+and `tests/system/test_engine_abort_versions.cpp`. They cover checkpoint advancement,
+reopen, concurrent readers and version-vector boundaries. The broker-backed
+durability check is `tests/test_kafka_crash_recovery.py`.

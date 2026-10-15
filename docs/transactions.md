@@ -24,6 +24,10 @@ for the outstanding request to finish before rolling back its storage session.
 A timeout is not proof that an autocommit statement did not commit: the client
 must reconcile its outcome before retrying a write.
 
+Local rollback preserves rows committed by concurrent sessions. An aborted
+append in the middle of a table remains invisible until checkpoint compaction
+reclaims its slots; it does not prevent later durable checkpoints.
+
 ## Supported boundary
 
 The first storage operation selects the transaction's participant. Every later
