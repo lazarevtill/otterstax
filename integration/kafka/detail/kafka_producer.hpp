@@ -70,8 +70,13 @@ namespace otterstax::kafka::detail {
         [[nodiscard]] kafka_txn_result abort_transaction(std::chrono::milliseconds timeout);
 
     private:
-        kafka_producer_t(std::unique_ptr<RdKafka::Producer> producer, std::string topic, bool transactional) noexcept;
+        struct delivery_report_t;
+        kafka_producer_t(std::unique_ptr<delivery_report_t> delivery_report,
+                         std::unique_ptr<RdKafka::Producer> producer, std::string topic, bool transactional) noexcept;
 
+        // librdkafka keeps a borrowed pointer to this callback. Its address is
+        // stable across moves, and it outlives the producer during teardown.
+        std::unique_ptr<delivery_report_t> delivery_report_;
         std::unique_ptr<RdKafka::Producer> producer_;
         std::string topic_;
         bool transactional_;

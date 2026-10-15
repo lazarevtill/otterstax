@@ -80,6 +80,13 @@ a `kafka_node_t` plan root → `KafkaManager::execute`; else `kafka_write_target
 
 ## Constraints / conventions
 
+- Producer delivery reports determine whether queued messages reached the broker.
+  `flush()` reports rejected deliveries even when librdkafka's queue is empty;
+  a timed-out flush retains pending delivery errors. The callback has a stable
+  address across producer moves and outlives producer teardown. A successful
+  transaction abort drains and clears that transaction's delivery failures.
+  `tests/system/test_kafka_delivery.cpp` injects broker errors through librdkafka's
+  mock cluster and checks subsequent batches, moves and abort recovery.
 - A transactional SOURCE replaces the checkpoint rows of each touched partition
   in the same engine transaction as its data insert. Untouched partitions retain
   their rows. A failed replacement rolls back both the deletion and the data.
