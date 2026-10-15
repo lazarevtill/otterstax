@@ -44,4 +44,5 @@ uses this policy for SQL bootstrap lists and every resolver call, including
 advertised brokers. The librdkafka C++ API owns its opaque pointer; the C
 thread-start interceptor installs each handle's policy in its private thread
 context before DNS resolution. Never overwrite the library's opaque pointer or
-permit a resolver call without its policy.
+permit a resolver call without its policy. S3 endpoints come only from startup
+aliases; clients use path-style bucket addressing and reject ARN/authority paths.

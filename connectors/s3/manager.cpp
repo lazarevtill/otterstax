@@ -44,6 +44,9 @@ make_s3fs(const connect_params& creds) {
     opts.scheme = std::string_view{creds.scheme};
     opts.tls_ca_file_path = std::string_view{creds.ca_file};
     opts.tls_verify_certificates = true;
+    // A SQL bucket must stay in the request path, never become a hostname or
+    // an access-point ARN that overrides the administrator's endpoint.
+    opts.force_virtual_addressing = false;
 
     return arrow::fs::S3FileSystem::Make(opts);
 }
@@ -192,6 +195,11 @@ ConnectorManager::list(session_hash_t id, std::string alias, std::string s3_path
         co_return unknown_alias(resource(), "list", alias);
     }
 
+    if (!otterstax::valid_s3_bucket_path(s3_path)) {
+        co_return tsl::make_error(resource(), core::error_code_t::invalid_parameter,
+                                  "S3 path must use a bucket name, not a URL, authority or access-point ARN");
+    }
+
     auto fs_result = make_s3fs(it->second);
     if (!fs_result.ok()) {
         co_return tsl::arrow_error(resource(), core::error_code_t::io_error, "list", fs_result.status());
@@ -226,6 +234,11 @@ ConnectorManager::download(session_hash_t id, std::string alias, std::string s3_
     if (it == credentials_store_.end()) {
         log_->error("download: unknown alias '{}'", alias);
         co_return unknown_alias(resource(), "download", alias);
+    }
+
+    if (!otterstax::valid_s3_bucket_path(s3_path)) {
+        co_return tsl::make_error(resource(), core::error_code_t::invalid_parameter,
+                                  "S3 path must use a bucket name, not a URL, authority or access-point ARN");
     }
 
     auto fs_result = make_s3fs(it->second);
@@ -263,6 +276,11 @@ ConnectorManager::upload(session_hash_t id, std::string alias, std::string s3_pa
     if (it == credentials_store_.end()) {
         log_->error("upload: unknown alias '{}'", alias);
         co_return unknown_alias(resource(), "upload", alias);
+    }
+
+    if (!otterstax::valid_s3_bucket_path(s3_path)) {
+        co_return tsl::make_error(resource(), core::error_code_t::invalid_parameter,
+                                  "S3 path must use a bucket name, not a URL, authority or access-point ARN");
     }
 
     auto fs_result = make_s3fs(it->second);

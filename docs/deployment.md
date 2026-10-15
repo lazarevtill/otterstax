@@ -24,6 +24,9 @@ and drain transaction undo after failed DML. The application keeps ingested rows
 and partition checkpoints in one engine transaction. Kafka recovery errors
 prevent listeners from opening; an absent Kafka registry is a normal first start.
 
+Arrow is built from the pinned recipe in `cmake/conan-recipes/arrow`; its S3 client
+disables HTTP redirects for explicit endpoints.
+
 ## Listeners
 
 MySQL and PostgreSQL accept `service.mysql.host` and `service.postgres.host`
@@ -126,11 +129,18 @@ cannot use this internal manager to evade their local file permissions.
 
 ## S3 transport and credentials
 
-S3 connections use HTTPS, including custom `endpoint` values. An endpoint is a
+S3 connections require an explicit `endpoint`, including on AWS, and use HTTPS
+by default. An endpoint is a
 hostname with an optional port; configure its transport separately as `scheme`.
 TLS always verifies the certificate chain and hostname. `ca_file` supplies a PEM
 trust bundle for private object stores; otherwise the TLS library's trust store
 applies. Local HTTP object-store fixtures explicitly set `scheme: http`.
+For AWS, configure the S3 regional endpoint (for example,
+`s3.us-east-1.amazonaws.com`) and its matching `region`. Requests use path-style
+bucket addressing. SQL selects a configured alias and a bucket/object path;
+URLs, authorities and access-point ARNs are rejected before creating a client.
+HTTP redirects are rejected, including redirects to a different scheme or port.
+Configure the destination region's endpoint directly.
 
 ```yaml
 connections:

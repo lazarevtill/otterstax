@@ -36,7 +36,8 @@ class OtterStax(ConanFile):
     def requirements(self):
         if self.options.with_tracy:
             self.requires("tracy/0.13.1")
-        self.requires("arrow/24.0.0")
+        # Export cmake/conan-recipes/arrow before installing dependencies.
+        self.requires("arrow/24.0.0#7590860044e65a24a100d2eaae75ee6d")
         self.requires("openssl/3.0.13")
         self.requires("libcurl/8.22.0")
         self.requires("boost/1.88.0", override=True)

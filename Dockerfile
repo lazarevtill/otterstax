@@ -39,6 +39,8 @@ WORKDIR /app
 COPY cmake/build_jobs.py ./cmake/build_jobs.py
 COPY conanfile.py .
 COPY cmake/conan-recipes/otterbrix ./cmake/conan-recipes/otterbrix
+COPY cmake/conan-recipes/arrow ./cmake/conan-recipes/arrow
+RUN conan export cmake/conan-recipes/arrow --version=24.0.0
 RUN conan export cmake/conan-recipes/otterbrix
 RUN _jobs=$(python3 cmake/build_jobs.py "${BUILD_JOBS}" --memory-per-job-mib "${BUILD_MEMORY_PER_JOB_MIB}") && \
     printf '\ntools.build:jobs=%s\n' "${_jobs}" >> /root/.conan2/global.conf && \

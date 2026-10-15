@@ -73,6 +73,42 @@ namespace {
 
 } // namespace
 
+TEST_CASE("s3 connector: SQL paths cannot replace the configured destination") {
+    download_dir dir{"otterstax_s3_destination_policy"};
+    auto* resource = std::pmr::new_delete_resource();
+    auto s3 = actor_zeta::spawn<conn::s3::ConnectorManager>(resource, dir.path);
+    auto missing_endpoint = valid_params(resource, "storage");
+    missing_endpoint.endpoint.clear();
+    auto rejected = settled(actor_zeta::send(s3->address(), &conn::s3::ConnectorManager::add_credentials,
+                                               next_request_id(), std::move(missing_endpoint)));
+    REQUIRE(rejected.has_error());
+    CHECK(rejected.error().type == core::error_code_t::invalid_parameter);
+    auto registered = settled(actor_zeta::send(s3->address(), &conn::s3::ConnectorManager::add_credentials,
+                                                 next_request_id(), valid_params(resource, "storage")));
+    REQUIRE_FALSE(registered.has_error());
+    for (const auto& path : {std::string("http://forbidden.example/key"), std::string("//forbidden.example/key"),
+                             std::string("bucket@forbidden.example/key"), std::string("bucket:9000/key"),
+                             std::string("arn:aws:s3:us-east-1:123456789012:accesspoint/example/key"),
+                             std::string("bucket%2fother/key"), std::string("bucket\\other/key"),
+                             std::string("bucket\0hidden/key", 17)}) {
+        INFO(path);
+        auto listed = settled(actor_zeta::send(s3->address(), &conn::s3::ConnectorManager::list,
+                                                next_request_id(), std::string("storage"), path));
+        REQUIRE(listed.has_error());
+        CHECK(listed.error().type == core::error_code_t::invalid_parameter);
+        auto downloaded = settled(actor_zeta::send(s3->address(), &conn::s3::ConnectorManager::download,
+                                                    next_request_id(), std::string("storage"), path));
+        REQUIRE(downloaded.has_error());
+        CHECK(downloaded.error().type == core::error_code_t::invalid_parameter);
+        auto uploaded = settled(actor_zeta::send(s3->address(), &conn::s3::ConnectorManager::upload,
+                                                  next_request_id(), std::string("storage"), path,
+                                                  std::string("/nonexistent/file.csv")));
+        REQUIRE(uploaded.has_error());
+        CHECK(uploaded.error().type == core::error_code_t::invalid_parameter);
+    }
+    CHECK(entries_in(dir.path) == 0);
+}
+
 TEST_CASE("s3 connector: add_credentials rejects an empty alias or empty keys as invalid_parameter") {
     download_dir dir{"otterstax_s3_errors_add"};
     auto* resource = std::pmr::new_delete_resource();

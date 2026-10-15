@@ -17,9 +17,10 @@ use directory descriptors and atomic exports; S3 staging is private to each tena
 data directory. S3 endpoints default to verified HTTPS and support environment
 credential references. Deployment details live in `docs/deployment.md`.
 
-
 Outbound Kafka destinations require `service.security.kafka_brokers`, including
-advertised brokers. Both deployment modes enforce this policy.
+advertised brokers. S3 aliases require explicit endpoints and use path-style
+bucket addressing. Both deployment modes apply these restrictions.
+
 
 Engine storage and application logs use `--data-dir`, then `OTTERSTAX_DATA_DIR`,
 then `./data`. Docker images set `OTTERSTAX_DATA_DIR=/app/data`. Tenant instances
@@ -86,7 +87,7 @@ Wire-server settings live under the top-level `service:` node so
 backends under `connections:` (`connections.mysql`/`connections.postgresql`) —
 different nesting. All `connections:` sections are optional (missing → empty).
 `port` is an **optional string** (empty → driver default). `schema` defaults to
-`public`. s3 `region`/`session_token`/`endpoint` are optional; malformed YAML
+`public`. s3 `endpoint` is required; `region` and `session_token` are optional; malformed YAML
 aborts startup. `service.connection_retry` (optional; default `max_attempts: 1`,
 `delay_ms: 1000` = one-shot) sets how many times startup retries opening a slow
 backend. The `alias` is the outermost qualifier in federated SQL
@@ -175,6 +176,7 @@ the VM's RAM is far smaller than the host's.
 ```bash
 # Install Conan deps
 conan export cmake/conan-recipes/otterbrix
+conan export cmake/conan-recipes/arrow --version=24.0.0
 conan install conanfile.py --build missing -s build_type=Release
 
 # Configure

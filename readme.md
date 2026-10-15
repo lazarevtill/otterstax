@@ -260,6 +260,7 @@ conan profile detect --force
 
 ```bash
 conan export cmake/conan-recipes/otterbrix
+conan export cmake/conan-recipes/arrow --version=24.0.0
 conan install . --build=missing -s build_type=Release \
   -c tools.build:jobs="${BUILD_JOBS:?Set BUILD_JOBS to fit available RAM and CPUs}"
 ```

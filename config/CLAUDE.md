@@ -7,7 +7,8 @@ the YAML parser validates shape and scalar values. Trusted-private mode allows a
 directories but retains the encoded file-size bound. See `docs/deployment.md`.
 
 S3 entries default to `scheme: https`; `ca_file` optionally supplies a PEM trust
-bundle. `endpoint` is a host/port, not a URL. Local HTTP fixtures opt in explicitly.
+bundle. `endpoint` is required and contains a hostname/IP with optional port,
+including for AWS. Local HTTP fixtures opt in explicitly.
 `access_key_env`, `secret_key_env` and `session_token_env` resolve populated
 environment variables at startup and cannot coexist with their inline fields.
 
@@ -198,7 +199,7 @@ connections:
 
 `port` is an **optional string** (empty → driver default; otherwise a decimal
 integer in 1..65535, anything else aborts startup). `schema` defaults to
-`public`. s3 `region`/`session_token`/`endpoint` are optional. `connection_retry`
+`public`. s3 `endpoint` is required; `region` and `session_token` are optional. `connection_retry`
 is optional (defaults to `max_attempts: 1`, `delay_ms: 1000` = one-shot), and so
 is `spark_connect` (defaults to `0.0.0.0:15002`, either key alone overriding its
 own default).

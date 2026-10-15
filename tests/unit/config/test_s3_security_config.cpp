@@ -11,9 +11,12 @@ TEST_CASE("S3 transport defaults to verified HTTPS and accepts explicit local HT
     CHECK_FALSE(otterstax::validate_s3_transport("https", "storage.example:9443", "/tls/root.pem"));
     CHECK_FALSE(otterstax::validate_s3_transport("https", "[::1]:9443", ""));
     CHECK_FALSE(otterstax::validate_s3_transport("http", "localhost:9000", ""));
+    CHECK_FALSE(otterstax::validate_s3_transport("https", "s3.us-east-1.amazonaws.com", ""));
+    CHECK(otterstax::validate_s3_transport("https", "", ""));
     CHECK(otterstax::validate_s3_transport("ftp", "storage.example", ""));
     CHECK(otterstax::validate_s3_transport("http", "localhost:9000", "/tls/root.pem"));
-    for (const auto* endpoint : {"http://storage.example", "user@storage.example", "host/path", "host?x=y", "host#x", "host\n"}) {
+    for (const auto* endpoint : {"http://storage.example", "user@storage.example", "host/path", "host?x=y", "host#x", "host\n",
+                                  "127.1", "0x7f000001", "storage.example:0", "storage.example:65536", "[::1%lo]:443"}) {
         CHECK(otterstax::validate_s3_transport("https", endpoint, ""));
     }
     auto parsed = config::parse_connections(YAML::Load(R"(s3:

@@ -216,7 +216,7 @@ connections:
     CHECK(cfg.postgresql[0].schema == "public");
 }
 
-TEST_CASE("parse_connections: optional s3 fields default to empty") {
+TEST_CASE("parse_connections: S3 requires an explicit endpoint") {
     const std::string yaml = R"(
 connections:
   s3:
@@ -224,15 +224,19 @@ connections:
       access_key: ak
       secret_key: sk
 )";
-    auto cfg = parse_ok(connections_node(yaml));
+    auto result = config::parse_connections(connections_node(yaml), std::pmr::new_delete_resource());
+    REQUIRE(result.has_error());
+    CHECK(std::string(result.error().what).find("endpoint") != std::string::npos);
+    auto explicit_node = connections_node(yaml);
+    explicit_node["s3"][0]["endpoint"] = "s3.us-east-1.amazonaws.com";
+    auto cfg = parse_ok(explicit_node);
     REQUIRE(cfg.s3.size() == 1);
-    const auto& s3 = cfg.s3[0];
-    CHECK(s3.alias == "aws");
-    CHECK(s3.access_key == "ak");
-    CHECK(s3.secret_key == "sk");
-    CHECK(s3.region.empty());
-    CHECK(s3.session_token.empty());
-    CHECK(s3.endpoint.empty());
+    CHECK(cfg.s3[0].alias == "aws");
+    CHECK(cfg.s3[0].access_key == "ak");
+    CHECK(cfg.s3[0].secret_key == "sk");
+    CHECK(cfg.s3[0].region.empty());
+    CHECK(cfg.s3[0].session_token.empty());
+    CHECK(cfg.s3[0].endpoint == "s3.us-east-1.amazonaws.com");
 }
 
 TEST_CASE("parse_connections: multiple entries per section preserve order") {
@@ -358,7 +362,7 @@ TEST_CASE("validation_error: complete descriptors pass") {
     config::ChConnectionDesc ch{.alias = "a", .host = "h", .port = "1", .username = "u", .database = "d"};
     CHECK_FALSE(config::validation_error(ch).has_value());
 
-    config::S3CredentialDesc s3{.alias = "a", .access_key = "k", .secret_key = "s"};
+    config::S3CredentialDesc s3{.alias = "a", .access_key = "k", .secret_key = "s", .endpoint = "storage.example"};
     CHECK_FALSE(config::validation_error(s3).has_value());
 }
 
