@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+`OTTERSTAX_RUN_STRESS=1 python test_stress.py` requires every load query to
+succeed and checks all 400 concurrent writes, including values, through a new
+connection. Each run owns a unique remote table and explicitly enables autocommit.
+The disruption case in `test_concurrency.py` requires `OTTERSTAX_RUN_DISRUPTION=1`,
+`OTTERSTAX_TEST_COMPOSE_PROJECT`, `OTTERSTAX_TEST_BACKEND_SERVICE` and Docker access.
+It selects exactly one running container by Compose labels, requires server error
+3024 before the client read deadline, unpauses it in `finally`, and checks recovery.
+
+
 Scheduler tests using `isolated_test_engine` own a unique temporary directory
 for each engine's catalog, WAL and logs. Keep the fixture alive until all actors
 and copied engine handles have been destroyed. Persistence remains enabled;
